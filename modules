@@ -1,0 +1,11 @@
+#!/bin/bash
+export HSA_XNACK=1
+module purge                                                                                                                                                                                                    
+module load LUMI/23.09                                                                                                                                                                                          
+module load partition/G                                                                                                                                                                                         
+module load PrgEnv-cray                                                                                                                                                                                         
+module load craype-accel-amd-gfx90a                                                                                                                                                                             
+module load rocm                                                                                                                                                                                                
+module load cray-libsci                                                                                                                                                                                         
+module load cray-hdf5/1.12.2.7                                                                                                                                                                                  
+module load cray-netcdf/4.9.0.7 
