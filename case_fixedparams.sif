@@ -54,7 +54,7 @@ Solver 1
   Variable = -dofs 1 "Temperature"
 
   !Procedure = "/scratch/elmer/jahokk/build_Elmer_devel/fem/tests/ModelPDEevol/ModelPDEevol.so" "AdvDiffSolver"
-Procedure = "./ModelPDEevol_fixedparams.so" "AdvDiffSolver"
+  Procedure = "./Poisson.so" "AdvDiffSolver"
 
   Nonlinear System Max Iterations = 1
   Nonlinear System Consistent Norm = True

@@ -1,1 +1,0 @@
-ELMERSOLVER_LINK_LIBRARY=-lelmersolverstatic elmerf90 ModelPDEevol_fixedparams.F90 -o ModelPDEevol_fixedparams.so
