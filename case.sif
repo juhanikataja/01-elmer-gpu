@@ -20,8 +20,10 @@ Simulation
 
   Mesh Levels = 3
 
+  Output Level = 10
+
   Simulation Timing = Logical True
-!  Post File = "case.vtu"
+  Post File = "case_fixedparams.vtu"
 End
 
 
@@ -49,7 +51,10 @@ Solver 1
   Exec Solver = "Always"
   Equation = "HeatEquation"
 
-  Procedure = "HeatSolveVec" "HeatSolver"
+  Variable = -dofs 1 "Temperature"
+
+  !Procedure = "/scratch/elmer/jahokk/build_Elmer_devel/fem/tests/ModelPDEevol/ModelPDEevol.so" "AdvDiffSolver"
+  Procedure = "./Poisson.so" "AdvDiffSolver"
 
   Nonlinear System Max Iterations = 1
   Nonlinear System Consistent Norm = True
@@ -61,6 +66,9 @@ Solver 1
   Linear System Timing = True
   Solver Timing = True
 
+  Multithreaded Startup = Logical True
+  Multicolour Solver = Logical True
+  Multicolour Consistent = Logical True
 
 !!!!!!!!!  Include the wanted solver here  !!!!!!!!!
 
@@ -78,7 +86,7 @@ Solver 2
   Equation = SaveTimings
   Procedure = "SaveData" "SaveScalars"
 
-  Filename = f.dat
+  Filename = "f.dat"
   Variable 1 = Temperature
   Operator 1 = dofs
   Operator 2 = elements
@@ -102,14 +110,14 @@ End
 
 Material 1
   Name = "Ideal"
-  Heat Conductivity = 1.0
+  Diffusion Coefficient = Real 1.0
   Density = 1.0
 End
 
 
 Body Force 1
   Name = "Heating"
-  Heat Source = 1.0
+  Field Source = Real 1.0
 End
 
 
@@ -128,5 +136,7 @@ End
 
 
 Solver 1 :: Reference Norm = 1.42066313E+00
+Solver 1 :: Reference Norm Tolerance = 0.02
+
 
 !End Of File

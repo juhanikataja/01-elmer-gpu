@@ -1,17 +1,4 @@
 
-module gpu_utils
-use DefUtils
-
-type elem_ptr
-  type(Element_t), pointer :: p
-end type
-
-type elem_list_t
-  type(elem_ptr), allocatable :: elements(:)
-end type
-
-
-end module
 
 !-----------------------------------------------------------------------------
 !> A prototype solver for advection-diffusion-reaction equation.
@@ -44,7 +31,6 @@ END SUBROUTINE AdvDiffSolver_Init
 SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
   USE DefUtils
-  USE gpu_utils
 
   IMPLICIT NONE
 !------------------------------------------------------------------------------
@@ -61,6 +47,15 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state
   LOGICAL :: Found, VecAsm, InitHandles
   integer, allocatable :: n_active_in_col(:)
+
+  type :: elem_ptr
+    type(Element_t), pointer :: p
+  end type
+
+  type :: elem_list_t
+    type(elem_ptr), allocatable :: elements(:)
+  end type
+
   TYPE(elem_list_t), allocatable :: elem_lists(:)
 
   CHARACTER(*), PARAMETER :: Caller = 'AdvDiffSolver'
@@ -82,81 +77,75 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   ! Nonlinear iteration loop:
   !--------------------------
-  DO iter=1,maxiter
+  ! DO iter=1,maxiter
 
-    ! System assembly:
-    !----------------
-    CALL DefaultInitialize()
+  ! System assembly:
+  !----------------
+  CALL DefaultInitialize()
 
-    totelem = 0
+  totelem = 0
 
-    nColours = GetNOFColours(Solver)
-    VecAsm = (nColours > 1) .OR. (nthr == 1)
-    
-    CALL ResetTimer( Caller//'BulkAssembly' )
+  VecAsm = (nColours > 1) .OR. (nthr == 1)
 
-    ALLOCATE(n_active_in_col(nColours))
-    ALLOCATE(elem_lists(nColours))
+  CALL ResetTimer( Caller//'BulkAssembly' )
 
-    do state=1,2
-      do col=1,ncolours
-        
 
-        if (state == 1) THEN
-          active=GetNOFActive(Solver)
-          n_active_in_col(nColours) = active
-          allocate(elem_lists(col)%elements(active))
-        end if
-        if (state == 2) then
-          active = n_active_in_col(col)
-          do t=1,active
-            elem_lists(col) % elements(t) % p => GetActiveElement(t)
-          end do
-        end if
-      end do
+  nColours = GetNOFColours(Solver)
+
+  allocate(elem_lists(nColours))
+  ALLOCATE(n_active_in_col(nColours))
+
+  do col = 1, nColours
+    active = GetNOFActive(Solver)
+    allocate(elem_lists(col) % elements(active))
+  end do
+
+  nColours = GetNOFColours(Solver)
+  do col=1,ncolours
+    active = GetNOFActive(Solver)
+    do t=1,active
+      elem_lists(col) % elements(t) % p => GetActiveElement(t)
     end do
+  end do
 
-    do col=1,nColours
-      print *, 'col, n_elem: ', col, n_active_in_col(col)
-    end do
 
-exit
-   
-    DO col=1,nColours
-      
-      CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=15)
-      Active = GetNOFActive(Solver)
+  stop
 
-      DO t=1,Active
-        Element => GetActiveElement(t)
-        totelem = totelem + 1
-        n  = GetElementNOFNodes(Element)
-        nd = GetElementNOFDOFs(Element)
-        nb = GetElementNOFBDOFs(Element)
-        CALL LocalMatrixVec(  Element, n, nd+nb, nb, VecAsm )
-      END DO
+  DO col=1,nColours
+
+    CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=15)
+    Active = GetNOFActive(Solver)
+
+    DO t=1,Active
+      Element => elem_lists(col) % elements(t) % p
+      totelem = totelem + 1
+      n  = GetElementNOFNodes(Element)
+      nd = GetElementNOFDOFs(Element)
+      nb = GetElementNOFBDOFs(Element)
+      CALL LocalMatrixVec(  Element, n, nd+nb, nb, VecAsm )
     END DO
+  END DO
 
-    CALL CheckTimer(Caller//'BulkAssembly',Delete=.TRUE.)
-    totelem = 0
+  CALL CheckTimer(Caller//'BulkAssembly',Delete=.TRUE.)
+  totelem = 0
 
-    CALL DefaultFinishBulkAssembly()
+  CALL DefaultFinishBulkAssembly()
 
-    nColours = GetNOFBoundaryColours(Solver)
-    VecAsm = (nColours > 1) .OR. (nthr == 1)
+  nColours = GetNOFBoundaryColours(Solver)
+  VecAsm = (nColours > 1) .OR. (nthr == 1)
 
-    CALL ResetTimer(Caller//'BCAssembly')
-    
-    !! don't touch boundary stuff yet
-    !$OMP PARALLEL &
-    !$OMP SHARED(Active, Solver, nColours, VecAsm) &
-    !$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
-    !$OMP REDUCTION(+:totelem) DEFAULT(NONE)
-    DO col=1,nColours
-       !$OMP SINGLE
-       CALL Info('ModelPDEthreaded','Assembly of boundary colour: '//I2S(col),Level=10)
-       Active = GetNOFBoundaryActive(Solver)
-       !$OMP END SINGLE
+  CALL ResetTimer(Caller//'BCAssembly')
+
+  !! don't touch boundary stuff yet
+  !$OMP PARALLEL &
+  !$OMP SHARED(Active, Solver, nColours, VecAsm) &
+  !$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
+  !$OMP REDUCTION(+:totelem) DEFAULT(NONE)
+  DO col=1,nColours
+    !$OMP SINGLE
+    CALL Info('ModelPDEthreaded','Assembly of boundary colour: '//I2S(col),Level=10)
+    Active = GetNOFBoundaryActive(Solver)
+    !$OMP END SINGLE
 
        InitHandles = .TRUE. 
        !$OMP DO
@@ -185,9 +174,9 @@ exit
     !--------------------
     Norm = DefaultSolve()
 
-    IF( Solver % Variable % NonlinConverged == 1 ) EXIT
+    ! IF( Solver % Variable % NonlinConverged == 1 ) EXIT
 
-  END DO
+  ! END DO
 
   CALL DefaultFinish()
 
@@ -293,9 +282,9 @@ CONTAINS
     Found = .TRUE.
     
     IF( Found ) THEN
-      !$omp target
+      !!$omp target
       CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % DIMENSION, dBasisdx, DetJ, STIFF, DiffCoeff )
-      !$omp end target
+      !!$omp end target
     END IF
 
     ! reaction term 
