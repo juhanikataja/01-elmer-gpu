@@ -44,12 +44,13 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   TYPE(Element_t),POINTER :: Element
   REAL(KIND=dp) :: Norm
   INTEGER :: n, nb, nd, t, active
-  INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state
+  INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state, MaxNumNodes
   LOGICAL :: Found, VecAsm, InitHandles
   integer, allocatable :: n_active_in_col(:)
 
   type :: elem_ptr
     type(Element_t), pointer :: p
+    integer :: n, nd, nb                        ! nof nodes, nof dofs, nofbdofs
   end type
 
   type :: elem_list_t
@@ -101,15 +102,31 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   end do
 
   nColours = GetNOFColours(Solver)
+  !$OMP PARALLEL &
+  !$OMP SHARED(Active, Solver, nColours, VecAsm, elem_lists) &
+  !$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
+  !$OMP REDUCTION(max:MaxNumNodes) DEFAULT(none)
   do col=1,ncolours
+    !$OMP SINGLE
     active = GetNOFActive(Solver)
+    !$OMP END SINGLE
+
+    !$OMP DO
     do t=1,active
-      elem_lists(col) % elements(t) % p => GetActiveElement(t)
+      Element => GetActiveElement(t)
+      elem_lists(col) % elements(t) % p => Element
+      elem_lists(col) % elements(t) % n = GetElementNOFNodes(Element)
+      elem_lists(col) % elements(t) % nd = GetElementNOFDOFs(Element)
+      elem_lists(col) % elements(t) % nb = GetElementNOFBDOFs(Element)
+      MaxNumNodes = max(MaxNumNodes,elem_lists(col) % elements(t) % n)
     end do
+    !$OMP END DO
   end do
+  !$OMP END PARALLEL
 
+  CALL CheckTimer(Caller//'BulkAssembly', Delete=.TRUE.)
 
-  stop
+  return
 
   DO col=1,nColours
 
@@ -117,16 +134,18 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     Active = GetNOFActive(Solver)
 
     DO t=1,Active
-      Element => elem_lists(col) % elements(t) % p
       totelem = totelem + 1
-      n  = GetElementNOFNodes(Element)
-      nd = GetElementNOFDOFs(Element)
-      nb = GetElementNOFBDOFs(Element)
+      Element => elem_lists(col) % elements(t) % p
+      ! n  = GetElementNOFNodes(Element)
+      ! nd = GetElementNOFDOFs(Element)
+      ! nb = GetElementNOFBDOFs(Element)
+      n = elem_lists(col) % elements(t) % n
+      nd = elem_lists(col) % elements(t) % nd
+      nb = elem_lists(col) % elements(t) % nb
       CALL LocalMatrixVec(  Element, n, nd+nb, nb, VecAsm )
     END DO
   END DO
 
-  CALL CheckTimer(Caller//'BulkAssembly',Delete=.TRUE.)
   totelem = 0
 
   CALL DefaultFinishBulkAssembly()
@@ -267,8 +286,10 @@ CONTAINS
     ! Numerical integration:
     ! Compute basis function values and derivatives at integration points
     !--------------------------------------------------------------
+    !!$omp target
     stat = ElementInfoVec( Element, Nodes, ngp, IP % U, IP % V, IP % W, detJ, &
          SIZE(Basis,2), Basis, dBasisdx )
+    !!$omp end target
 
     ! Compute actual integration weights (recycle the memory space of DetJ)
     DO t=1,ngp
@@ -282,7 +303,7 @@ CONTAINS
     Found = .TRUE.
     
     IF( Found ) THEN
-      !!$omp target
+       !$omp target
       CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % DIMENSION, dBasisdx, DetJ, STIFF, DiffCoeff )
       !!$omp end target
     END IF
