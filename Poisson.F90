@@ -26,7 +26,6 @@ SUBROUTINE AdvDiffSolver_init( Model,Solver,dt,TransientSimulation )
 END SUBROUTINE AdvDiffSolver_Init
 
 
-
 !------------------------------------------------------------------------------
 SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
@@ -126,11 +125,11 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   CALL CheckTimer(Caller//'BulkAssembly', Delete=.TRUE.)
 
-  return
+  nColours = GetNOFColours(Solver)
 
   DO col=1,nColours
 
-    CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=15)
+    CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=1)
     Active = GetNOFActive(Solver)
 
     DO t=1,Active
@@ -142,10 +141,13 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
       n = elem_lists(col) % elements(t) % n
       nd = elem_lists(col) % elements(t) % nd
       nb = elem_lists(col) % elements(t) % nb
+      !$omp target
       CALL LocalMatrixVec(  Element, n, nd+nb, nb, VecAsm )
+      !$omp end target
     END DO
   END DO
 
+  return
   totelem = 0
 
   CALL DefaultFinishBulkAssembly()
@@ -224,10 +226,10 @@ CONTAINS
     TYPE(Nodes_t), SAVE :: Nodes
     LOGICAL, SAVE :: FirstTime=.TRUE.
     
-    !$OMP THREADPRIVATE(Basis, dBasisdx, DetJ, &
-    !$OMP               MASS, STIFF, FORCE, Nodes, &
-    !$OMP               SourceCoeff, DiffCoeff, ReactCoeff, TimeCoeff, &
-    !$OMP               ConvCoeff, Velo1Coeff, Velo2Coeff, Velo3Coeff, VeloCoeff )
+    !!$OMP THREADPRIVATE(Basis, dBasisdx, DetJ, &
+    !!$OMP               MASS, STIFF, FORCE, Nodes, &
+    !!$OMP               SourceCoeff, DiffCoeff, ReactCoeff, TimeCoeff, &
+    !!$OMP               ConvCoeff, Velo1Coeff, Velo2Coeff, Velo3Coeff, VeloCoeff )
     !DIR$ ATTRIBUTES ALIGN:64 :: Basis, dBasisdx, DetJ
     !DIR$ ATTRIBUTES ALIGN:64 :: MASS, STIFF, FORCE
 !------------------------------------------------------------------------------
@@ -259,22 +261,6 @@ CONTAINS
       END IF
       FirstTime=.FALSE.
     END IF
-    
-    ! Deallocate storage if needed
-!    IF (ALLOCATED(Basis)) THEN
-!      IF (SIZE(Basis,1) < ngp .OR. SIZE(Basis,2) < nd) &
-!            DEALLOCATE(Basis,dBasisdx, DetJ, MASS, STIFF, FORCE, VeloCoeff )
-!    END IF
-
-    ! Allocate storage if needed
- !   IF (.NOT. ALLOCATED(Basis)) THEN
- !     ALLOCATE(Basis(ngp,nd), dBasisdx(ngp,nd,3), DetJ(ngp), &
- !         MASS(nd,nd), STIFF(nd,nd), FORCE(nd), VeloCoeff(ngp,3), STAT=allocstat)
-      
- !     IF (allocstat /= 0) THEN
- !       CALL Fatal(Caller,'Local storage allocation failed')
- !     END IF
- !   END IF
 
     CALL GetElementNodesVec( Nodes, UElement=Element )
 
@@ -296,46 +282,15 @@ CONTAINS
       DetJ(t) = IP % s(t) * Detj(t)
     END DO
 
-    ! diffusion term     
-    ! STIFF=STIFF+(D*grad(u),grad(v))
-    !DiffCoeff => ListGetElementRealVec( DiffCoeff_h, ngp, Basis, Element, Found )
-    
-    Found = .TRUE.
-    
-    IF( Found ) THEN
-       !$omp target
+    ! !$omp target
       CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % DIMENSION, dBasisdx, DetJ, STIFF, DiffCoeff )
-      !!$omp end target
-    END IF
-
-    ! reaction term 
-    ! STIFF=STIFF+(R*u,v)
-    !ReactCoeff => ListGetElementRealVec( ReactCoeff_h, ngp, Basis, Element, Found ) 
-    IF( Found ) THEN    
-      CALL LinearForms_UdotU(ngp, nd, Element % TYPE % DIMENSION, Basis, DetJ, STIFF, ReactCoeff )
-    END IF
-    
-    ! time derivative
-    ! MASS=MASS+(rho*du/dt,v)
-    !TimeCoeff => ListGetElementRealVec( TimeCoeff_h, ngp, Basis, Element, Found ) 
-    IF( Found ) THEN
-      CALL LinearForms_UdotU(ngp, nd, Element % TYPE % DIMENSION, Basis, DetJ, MASS, TimeCoeff )
-    END IF
-      
-    ! FORCE=FORCE+(u,f)
-    !SourceCoeff => ListGetElementRealVec( SourceCoeff_h, ngp, Basis, Element, Found ) 
-    IF( Found ) THEN
-      CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
-    END IF
-
-    
-    ! advection term
-    ! STIFF=STIFF+(C*grad(u),v)
+    !!$omp end target
  
     
-    IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE,UElement=Element)
-    CALL CondensateP( nd-nb, nb, STIFF, FORCE )
-    CALL DefaultUpdateEquations(STIFF,FORCE,UElement=Element, VecAssembly=VecAsm)
+    ! DEBUG
+    !IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE,UElement=Element)
+    !CALL CondensateP( nd-nb, nb, STIFF, FORCE )
+    !CALL DefaultUpdateEquations(STIFF,FORCE,UElement=Element, VecAssembly=VecAsm)
 !------------------------------------------------------------------------------
   END SUBROUTINE LocalMatrixVec
 !------------------------------------------------------------------------------
