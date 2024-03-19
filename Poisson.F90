@@ -141,9 +141,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
       n = elem_lists(col) % elements(t) % n
       nd = elem_lists(col) % elements(t) % nd
       nb = elem_lists(col) % elements(t) % nb
-      !$omp target
       CALL LocalMatrixVec(  Element, n, nd+nb, nb, VecAsm )
-      !$omp end target
     END DO
   END DO
 
@@ -262,6 +260,7 @@ CONTAINS
       FirstTime=.FALSE.
     END IF
 
+      
     CALL GetElementNodesVec( Nodes, UElement=Element )
 
     ! Initialize
@@ -282,9 +281,9 @@ CONTAINS
       DetJ(t) = IP % s(t) * Detj(t)
     END DO
 
-    ! !$omp target
+    !$omp target
       CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % DIMENSION, dBasisdx, DetJ, STIFF, DiffCoeff )
-    !!$omp end target
+    !$omp end target
  
     
     ! DEBUG
