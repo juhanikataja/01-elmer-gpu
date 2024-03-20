@@ -1,5 +1,3 @@
-
-
 !-----------------------------------------------------------------------------
 !> A prototype solver for advection-diffusion-reaction equation.
 !> This equation is generic and intended for education purposes
@@ -40,7 +38,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
 ! Local variables
 !------------------------------------------------------------------------------
-  TYPE(Element_t),POINTER :: Element
+  TYPE(Element_t), POINTER :: Element
   REAL(KIND=dp) :: Norm
   INTEGER :: n, nb, nd, t, active
   INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state, MaxNumNodes
@@ -93,13 +91,17 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   nColours = GetNOFColours(Solver)
 
   allocate(elem_lists(nColours))
-  ALLOCATE(n_active_in_col(nColours))
+  allocate(n_active_in_col(nColours))
 
   do col = 1, nColours
     active = GetNOFActive(Solver)
     allocate(elem_lists(col) % elements(active))
   end do
 
+  !$omp target enter data map(to:solver%mesh%elements)
+  !$omp target enter data map(to:elem_lists)
+
+  !! Tabulate elements and their ndofs/nnodes/nb 
   nColours = GetNOFColours(Solver)
   !$OMP PARALLEL &
   !$OMP SHARED(Active, Solver, nColours, VecAsm, elem_lists) &
@@ -108,6 +110,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   do col=1,ncolours
     !$OMP SINGLE
     active = GetNOFActive(Solver)
+    !$omp target enter data map(to:elem_lists(col) % elements)
     !$OMP END SINGLE
 
     !$OMP DO
@@ -135,9 +138,6 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     DO t=1,Active
       totelem = totelem + 1
       Element => elem_lists(col) % elements(t) % p
-      ! n  = GetElementNOFNodes(Element)
-      ! nd = GetElementNOFDOFs(Element)
-      ! nb = GetElementNOFBDOFs(Element)
       n = elem_lists(col) % elements(t) % n
       nd = elem_lists(col) % elements(t) % nd
       nb = elem_lists(col) % elements(t) % nb
@@ -145,7 +145,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     END DO
   END DO
 
-  return
+  !return
   totelem = 0
 
   CALL DefaultFinishBulkAssembly()
@@ -208,10 +208,12 @@ CONTAINS
 !------------------------------------------------------------------------------
     USE LinearForms
     USE Integration
+    use iso_c_binding
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: n, nd, nb
-    TYPE(Element_t), POINTER :: Element
+    TYPE(Element_t), POINTER:: Element
     LOGICAL, INTENT(IN) :: VecAsm
+    TYPE(element_t) :: concrete_element
 !------------------------------------------------------------------------------
     REAL(KIND=dp), ALLOCATABLE, SAVE :: Basis(:,:),dBasisdx(:,:,:), DetJ(:)
     REAL(KIND=dp), ALLOCATABLE, SAVE :: MASS(:,:), STIFF(:,:), FORCE(:)
@@ -271,25 +273,40 @@ CONTAINS
     ! Numerical integration:
     ! Compute basis function values and derivatives at integration points
     !--------------------------------------------------------------
-    !!$omp target
+
+    print *, element%bodyid
+    !!$omp target map(concrete_element, concrete_element % type, concrete_element % type % dimension)
+    !$omp target map(to: element, element%bodyid, element%type, element%type%dimension)
+    print *, element
+    !print *, element%type%dimension
+    !$omp end target
+
+    stop
+    !$omp target data map(to:element, element%type)
+    !$omp target
     stat = ElementInfoVec( Element, Nodes, ngp, IP % U, IP % V, IP % W, detJ, &
          SIZE(Basis,2), Basis, dBasisdx )
-    !!$omp end target
+    !$omp end target
+    !$omp end target data
 
     ! Compute actual integration weights (recycle the memory space of DetJ)
     DO t=1,ngp
       DetJ(t) = IP % s(t) * Detj(t)
     END DO
 
+    !!$omp target data map(to: ngp, nd, dBasisdx, detj, DiffCoeff) map(tofrom:stiff)
     !$omp target
-      CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % DIMENSION, dBasisdx, DetJ, STIFF, DiffCoeff )
+    ! CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, STIFF, DiffCoeff )
+    CALL LinearForms_GradUdotGradU(ngp, nd, 3, dBasisdx, DetJ, STIFF, DiffCoeff )
+    CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
     !$omp end target
+    !!$omp end target data
  
     
     ! DEBUG
     !IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE,UElement=Element)
-    !CALL CondensateP( nd-nb, nb, STIFF, FORCE )
-    !CALL DefaultUpdateEquations(STIFF,FORCE,UElement=Element, VecAssembly=VecAsm)
+    CALL CondensateP( nd-nb, nb, STIFF, FORCE )
+    CALL DefaultUpdateEquations(STIFF,FORCE,UElement=Element, VecAssembly=VecAsm)
 !------------------------------------------------------------------------------
   END SUBROUTINE LocalMatrixVec
 !------------------------------------------------------------------------------
