@@ -1,115 +1,147 @@
-module mylinearforms
-  USE Types, only: dp, VECTOR_BLOCK_LENGTH, VECTOR_SMALL_THRESH
 
-  !INTEGER, PARAMETER :: dp = SELECTED_REAL_KIND(12) 
-  !INTEGER, PARAMETER :: VECTOR_BLOCK_LENGTH = 128                                                                                                                                                                                                                                                                                                      
-  !INTEGER, PARAMETER :: VECTOR_SMALL_THRESH = 9                                                                                                                                                                                                                                                                                                        
+function MakeReferenceElement() result(element)
+use Types
+implicit none
 
-  PUBLIC :: LinearForms_GradUdotGradU
-  
-   !!$omp declare target (LinearForms_GradUdotGradU)
+type(element_t) :: element
+type(nodes_t) :: nodes
 
-   !$omp declare target to(LinearForms_GradUdotGradU)
-contains
-  SUBROUTINE LinearForms_GradUdotGradU(m, n, dim, GradU, weight, G, alpha)
-    implicit none
-    INTEGER, INTENT(IN) :: m, n, dim
-    REAL(KIND=dp) CONTIG, INTENT(IN) :: GradU(:,:,:), weight(:)
-    REAL(KIND=dp) CONTIG, INTENT(INOUT) :: G(:,:)
-    REAL(KIND=dp) CONTIG, INTENT(IN), OPTIONAL :: alpha(:)
+end function
 
-    REAL(KIND=dp) :: wrk(VECTOR_BLOCK_LENGTH,n)
-    INTEGER :: i, ii, iin, j, l, k, kk, ldbasis, ldwrk, ldk, blklen
-    LOGICAL :: noAlphaWeight
+!call myElementMetric(nd,Nodes,dim,Metric,DetG,dBasisdx(i,:,:),LtoGMap)
+subroutine myElementMetric(nDOFs,Nodes,dim,Metric,DetG,dLBasisdx,LtoGMap)
 
-    ldbasis = SIZE(GradU,1)
-    ldwrk = SIZE(wrk,1)
-    ldk = SIZE(G,1)
-
-    noAlphaWeight = .TRUE.
-    IF (PRESENT(alpha)) noAlphaWeight = .FALSE.
-
-    DO ii=1,m,VECTOR_BLOCK_LENGTH
-      iin=MIN(ii+VECTOR_BLOCK_LENGTH-1,m)
-      blklen=iin-ii+1
-      
-      IF (blklen < VECTOR_SMALL_THRESH) THEN
-        ! Do not attempt to call BLAS for small cases to avoid preprocessing overhead
-        IF (noAlphaWeight) THEN
-          DO j=1,n
-            DO i=1,n
-              DO k=1,dim
-                DO l=ii,iin
-                  G(i,j) = G(i,j) + GradU(l,i,k)*GradU(l,j,k)*weight(l)
-                END DO
-              END DO
-            END DO
-          END DO
-        ELSE
-          DO j=1,n
-            DO i=1,n
-              DO k=1,dim
-                DO l=ii,iin
-                  G(i,j) = G(i,j) + GradU(l,i,k)*GradU(l,j,k)*weight(l)*alpha(l)
-                END DO
-              END DO
-            END DO
-          END DO
-        END IF
-      ELSE
-        DO k=1, dim
-          IF (noAlphaWeight) THEN
-            DO j=1,n
-              DO i=ii,iin
-                wrk(i-ii+1,j)=weight(i)*GradU(i,j,k)
-              END DO
-            END DO
-          ELSE
-            DO j=1,n
-              DO i=ii,iin
-                wrk(i-ii+1,j)=weight(i)*alpha(i)*GradU(i,j,k)
-              END DO
-            END DO
-          END IF
-        END DO
-      END IF
-    END DO ! Vector blocks
-  END SUBROUTINE LinearForms_GradUdotGradU
-end module mylinearforms
-
-!-----------------------------------------------------------------------------
-!> A prototype solver for advection-diffusion-reaction equation.
-!> This equation is generic and intended for education purposes
-!> but may also serve as a starting point for more complex solvers.
-!> Version supporting multithreading and SIMD friendly ElmerSolver
-!> kernels. 
+use Types
+use DefUtils
+implicit none
 !------------------------------------------------------------------------------
-SUBROUTINE AdvDiffSolver_init( Model,Solver,dt,TransientSimulation )
+INTEGER :: nDOFs, dim           !< Number of active nodes in element, dimension of space
+TYPE(Nodes_t)    :: Nodes       !< Element nodal coordinates
+REAL(KIND=dp), intent(out) :: Metric(3,3)    !< Contravariant metric tensor
+REAL(KIND=dp), intent(in) :: dLBasisdx(nDOFs,3) !< Derivatives of element basis function with respect to local coordinates
+REAL(KIND=dp), intent(out) :: DetG           !< SQRT of determinant of metric tensor
+REAL(KIND=dp), intent(out) :: LtoGMap(3,3)   !< Transformation to obtain the referential description of the spatial gradient
+!LOGICAL :: Success              !< Returns .FALSE. if element is degenerate
 !------------------------------------------------------------------------------
-  USE DefUtils
-  IMPLICIT NONE
+!    Local variables
 !------------------------------------------------------------------------------
-  TYPE(Solver_t) :: Solver
-  TYPE(Model_t) :: Model
-  REAL(KIND=dp) :: dt
-  LOGICAL :: TransientSimulation
+REAL(KIND=dp) :: dx(3,3),G(3,3),GI(3,3),s
+REAL(KIND=dp), DIMENSION(:), POINTER :: x,y,z
+INTEGER :: GeomId     
+INTEGER :: cdim,i,j,k,n,imin,jmin
 !------------------------------------------------------------------------------
-  CHARACTER(*), PARAMETER :: Caller = 'AdvDiffSolver_init'
-  
-  IF ( CurrentCoordinateSystem() /= Cartesian ) THEN
-    CALL Fatal(Caller,'Implemented only in cartesian coordinates')
-  END IF
+x => Nodes % x
+y => Nodes % y
+z => Nodes % z
 
-END SUBROUTINE AdvDiffSolver_Init
+cdim = CoordinateSystemDimension()
+n = MIN( SIZE(x), nDOFs )
+!dim  = elm % TYPE % DIMENSION
 
+
+!------------------------------------------------------------------------------
+!    Partial derivatives of global coordinates with respect to local coordinates
+!------------------------------------------------------------------------------
+DO i=1,dim
+  dx(1,i) = SUM( x(1:n) * dLBasisdx(1:n,i) )
+  dx(2,i) = SUM( y(1:n) * dLBasisdx(1:n,i) )
+  dx(3,i) = SUM( z(1:n) * dLBasisdx(1:n,i) )
+END DO
+!------------------------------------------------------------------------------
+!    Compute the covariant metric tensor of the element coordinate system
+!------------------------------------------------------------------------------
+DO i=1,dim
+  DO j=1,dim
+    s = 0.0_dp
+    DO k=1,cdim
+      s = s + dx(k,i)*dx(k,j)
+    END DO
+    G(i,j) = s
+  END DO
+END DO
+!------------------------------------------------------------------------------
+!    Convert the metric to contravariant base, and compute the SQRT(DetG)
+!------------------------------------------------------------------------------
+SELECT CASE( dim )
+!------------------------------------------------------------------------------
+!      Line elements
+!------------------------------------------------------------------------------
+CASE (1)
+  DetG  = G(1,1)
+
+
+  Metric(1,1) = 1.0d0 / DetG
+  DetG  = SQRT( DetG )
+
+  !------------------------------------------------------------------------------
+  !      Surface elements
+  !------------------------------------------------------------------------------
+CASE (2)
+  DetG = ( G(1,1)*G(2,2) - G(1,2)*G(2,1) )
+
+
+  Metric(1,1) =  G(2,2) / DetG
+  Metric(1,2) = -G(1,2) / DetG
+  Metric(2,1) = -G(2,1) / DetG
+  Metric(2,2) =  G(1,1) / DetG
+  DetG = SQRT(DetG)
+
+  !------------------------------------------------------------------------------
+  !      Volume elements
+  !------------------------------------------------------------------------------
+CASE (3)
+  DetG = G(1,1) * ( G(2,2)*G(3,3) - G(2,3)*G(3,2) ) + &
+    G(1,2) * ( G(2,3)*G(3,1) - G(2,1)*G(3,3) ) + &
+    G(1,3) * ( G(2,1)*G(3,2) - G(2,2)*G(3,1) )
+
+
+  CALL InvertMatrix3x3( G,GI,detG )
+  Metric = GI
+  DetG = SQRT(DetG)
+END SELECT
+
+!--------------------------------------------------------------------------------------
+!    Construct a transformation X = LtoGMap such that (grad B)(f(p)) = X(p) Grad b(p),
+!    with Grad the gradient with respect to the reference element coordinates p and 
+!    the referential description of the spatial field B(x) satisfying B(f(p)) = b(p).
+!    If cdim > dim (e.g. a surface embedded in the 3-dimensional space), X is
+!    the transpose of the pseudo-inverse of Grad f.
+!-------------------------------------------------------------------------------
+DO i=1,cdim
+  DO j=1,dim
+    s = 0.0d0
+    DO k=1,dim
+      s = s + dx(i,k) * Metric(k,j)
+    END DO
+    LtoGMap(i,j) = s
+  END DO
+END DO
+
+end subroutine  myElementMetric
+
+
+!SUBROUTINE AdvDiffSolver_init( Model,Solver,dt,TransientSimulation )
+!!------------------------------------------------------------------------------
+  !USE DefUtils
+  !IMPLICIT NONE
+!!------------------------------------------------------------------------------
+  !TYPE(Solver_t) :: Solver
+  !TYPE(Model_t) :: Model
+  !REAL(KIND=dp) :: dt
+  !LOGICAL :: TransientSimulation
+!!------------------------------------------------------------------------------
+  !CHARACTER(*), PARAMETER :: Caller = 'AdvDiffSolver_init'
+  !
+  !IF ( CurrentCoordinateSystem() /= Cartesian ) THEN
+    !CALL Fatal(Caller,'Implemented only in cartesian coordinates')
+  !END IF
+!
+!END SUBROUTINE AdvDiffSolver_Init
 
 !------------------------------------------------------------------------------
 SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
-  USE DefUtils
-#ifdef _OPENMP
-  USE OMP_LIB
-#endif
+USE DefUtils
 
   IMPLICIT NONE
 !------------------------------------------------------------------------------
@@ -126,8 +158,6 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state, MaxNumNodes
   LOGICAL :: Found, VecAsm, InitHandles
   integer, allocatable :: n_active_in_col(:)
-  logical :: initial_device
-
 
   type :: elem_ptr
     type(Element_t), pointer :: p
@@ -171,11 +201,6 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   CALL ResetTimer( Caller//'BulkAssembly' )
 
-  !$omp target
-  initial_device = omp_is_initial_device()
-  !$omp end target
-
-  print *, 'initial_device:', initial_device
 
   nColours = GetNOFColours(Solver)
 
@@ -187,18 +212,22 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     allocate(elem_lists(col) % elements(active))
   end do
 
+  !$omp target enter data map(to:solver%mesh%elements)
+  !$omp target enter data map(to:elem_lists)
+
   !! Tabulate elements and their ndofs/nnodes/nb 
   nColours = GetNOFColours(Solver)
-  !!$OMP PARALLEL &
-  !!$OMP SHARED(Active, Solver, nColours, VecAsm, elem_lists) &
-  !!$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
-  !!$OMP REDUCTION(max:MaxNumNodes) DEFAULT(none)
+  !$OMP PARALLEL &
+  !$OMP SHARED(Active, Solver, nColours, VecAsm, elem_lists) &
+  !$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
+  !$OMP REDUCTION(max:MaxNumNodes) DEFAULT(none)
   do col=1,ncolours
-    !!$OMP SINGLE
+    !$OMP SINGLE
     active = GetNOFActive(Solver)
-    !!$OMP END SINGLE
+    !$omp target enter data map(to:elem_lists(col) % elements)
+    !$OMP END SINGLE
 
-    !!$OMP DO
+    !$OMP DO
     do t=1,active
       Element => GetActiveElement(t)
       elem_lists(col) % elements(t) % p => Element
@@ -207,9 +236,9 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
       elem_lists(col) % elements(t) % nb = GetElementNOFBDOFs(Element)
       MaxNumNodes = max(MaxNumNodes,elem_lists(col) % elements(t) % n)
     end do
-    !!$OMP END DO
+    !$OMP END DO
   end do
-  !!$OMP END PARALLEL
+  !$OMP END PARALLEL
 
   CALL CheckTimer(Caller//'BulkAssembly', Delete=.TRUE.)
 
@@ -241,18 +270,18 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   CALL ResetTimer(Caller//'BCAssembly')
 
   !! don't touch boundary stuff yet
-  !!$OMP PARALLEL &
-  !!$OMP SHARED(Active, Solver, nColours, VecAsm) &
-  !!$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
-  !!$OMP REDUCTION(+:totelem) DEFAULT(NONE)
+  !$OMP PARALLEL &
+  !$OMP SHARED(Active, Solver, nColours, VecAsm) &
+  !$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
+  !$OMP REDUCTION(+:totelem) DEFAULT(NONE)
   DO col=1,nColours
-    !!$OMP SINGLE
+    !$OMP SINGLE
     CALL Info('ModelPDEthreaded','Assembly of boundary colour: '//I2S(col),Level=10)
     Active = GetNOFBoundaryActive(Solver)
-    !!$OMP END SINGLE
+    !$OMP END SINGLE
 
        InitHandles = .TRUE. 
-       !!$OMP DO
+       !$OMP DO
        DO t=1,Active
           Element => GetBoundaryElement(t)
           ! WRITE (*,*) Element % ElementIndex
@@ -264,9 +293,9 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
              CALL LocalMatrixBC(  Element, n, nd+nb, nb, VecAsm, InitHandles )
           END IF
        END DO
-       !!$OMP END DO
+       !$OMP END DO
     END DO
-    !!$OMP END PARALLEL
+    !$OMP END PARALLEL
 
     CALL CheckTimer(Caller//'BCAssembly',Delete=.TRUE.)
         
@@ -292,28 +321,29 @@ CONTAINS
   SUBROUTINE LocalMatrixVec( Element, n, nd, nb, VecAsm )
 !------------------------------------------------------------------------------
     USE LinearForms
-    !use mylinearforms
     USE Integration
     use iso_c_binding
-
-
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: n, nd, nb
     TYPE(Element_t), POINTER:: Element
     LOGICAL, INTENT(IN) :: VecAsm
-    TYPE(element_t) :: concrete_element
+    TYPE(element_t) :: refElement
 !------------------------------------------------------------------------------
     REAL(KIND=dp), ALLOCATABLE, SAVE :: Basis(:,:),dBasisdx(:,:,:), DetJ(:)
     REAL(KIND=dp), ALLOCATABLE, SAVE :: MASS(:,:), STIFF(:,:), FORCE(:)
     REAL(KIND=dp), SAVE, ALLOCATABLE  :: DiffCoeff(:), ConvCoeff(:), ReactCoeff(:), &
          TimeCoeff(:), SourceCoeff(:), Velo1Coeff(:), Velo2Coeff(:), Velo3Coeff(:)
     REAL(KIND=dp), SAVE, ALLOCATABLE  :: VeloCoeff(:,:)
+    REAL(KIND=dp), target :: LtoGMap(3,3), metric(3,3), detg
     LOGICAL :: Stat,Found
     INTEGER :: i,t,p,q,dim,ngp,allocstat
     TYPE(GaussIntegrationPoints_t) :: IP
     TYPE(Nodes_t), SAVE :: Nodes
+    type(Nodes_t), SAVE :: refNodes
+    type(ElementType_t) :: refElementType
     LOGICAL, SAVE :: FirstTime=.TRUE.
-
+    real(KIND=dp) :: dLBasisdx(nd, 3)
+    
     !!$OMP THREADPRIVATE(Basis, dBasisdx, DetJ, &
     !!$OMP               MASS, STIFF, FORCE, Nodes, &
     !!$OMP               SourceCoeff, DiffCoeff, ReactCoeff, TimeCoeff, &
@@ -324,7 +354,7 @@ CONTAINS
 
 
 
-
+    
     dim = CoordinateSystemDimension()
     IP = GaussPoints( Element )
     ngp = IP % n
@@ -348,10 +378,67 @@ CONTAINS
         CALL Fatal(Caller,'Local storage allocation failed')
       END IF
       FirstTime=.FALSE.
+      allocate(refnodes %x(maxnumnodes), &
+	      refnodes %y(maxnumnodes), &
+	      refnodes %z(maxnumnodes), stat=allocstat)
+      IF (allocstat /= 0) THEN
+        CALL Fatal(Caller,'Local storage allocation failed')
+      END IF
     END IF
 
-
+      
     CALL GetElementNodesVec( Nodes, UElement=Element )
+    print *, '==Element nodes================================='
+    write (*,'(12F7.3)') nodes % x(1:nd)
+    write (*,'(12F7.3)') nodes % y(1:nd)
+    write (*,'(12F7.3)') nodes % z(1:nd)
+    print *, '================================================'
+
+    refElement = element
+
+    !call GetRefPElementNodes(Element%type, refnodes % x, refnodes % y, refnodes % z)
+    !INTEGER :: nDOFs                !< Number of active nodes in element
+    !TYPE(Nodes_t)    :: Nodes       !< Element nodal coordinates
+    !REAL(KIND=dp) :: Metric(:,:)    !< Contravariant metric tensor
+    !REAL(KIND=dp) :: dLBasisdx(:,:) !< Derivatives of element basis function with respect to local coordinates
+    !REAL(KIND=dp) :: DetG           !< SQRT of determinant of metric tensor
+    !REAL(KIND=dp) :: LtoGMap(3,3)   !< Transformation to obtain the referential description of the spatial gradient
+
+    ! TODO: wip loop over integration points and calculate myElementMetric
+    
+    print *, '==basis function values========================='
+    do i=1,ngp
+      call NodalBasisFunctions(nd, Basis(i,:), element, IP%u(i), IP%v(i), IP%w(i))
+      call NodalFirstDerivatives(nd, dBasisdx(i,:,:), element, IP%u(i), IP%v(i), IP%w(i))
+      write (*,'(12F7.3)') basis(i,:)
+    end do
+    print *, '==dbasis function values========================'
+
+    do i = 1,ngp
+      write (*,'(A)', advance='no') 'dx1 '
+      write (*,'(12F8.3)') dBasisdx(i,:,1)
+      write (*,'(A)', advance='no') 'dx2 '
+      write (*,'(12F8.3)') dBasisdx(i,:,2)
+      write (*,'(A)', advance='no') 'dx3 '
+      write (*,'(12F8.3)') dBasisdx(i,:,3)
+    end do
+    print *, '================================================'
+
+    do i=1,ngp
+      dLBasisdx(:,:) = dBasisdx(i,:,:)
+      write (*,'(12F8.3)') dLBasisdx(:,3)
+      call myElementMetric(nd,Nodes,dim,Metric,DetG,dLBasisdx,LtoGMap)
+      dbasisdx(i,:,:) = matmul(dlbasisdx, ltogmap)
+      write (*,'(12F8.3)') dBasisdx(i,:,3)
+    end do
+
+    write (*,'(12F7.3)') detG
+
+    stop
+
+    !SUBROUTINE GetRefPElementNodes(Element, U, V, W)
+    !TYPE(ElementType_t) :: Element
+    !REAL(KIND=dp) :: U(:), V(:), W(:)
 
     ! Initialize
     MASS  = 0._dp
@@ -365,37 +452,31 @@ CONTAINS
     print *, element%bodyid
     !!$omp target map(concrete_element, concrete_element % type, concrete_element % type % dimension)
     !$omp target map(to: element, element%bodyid, element%type, element%type%dimension)
-    !print *, element
-    print *, element%type%dimension
+    print *, element
+    !print *, element%type%dimension
     !$omp end target
 
-
-    !!$omp target data map(to:element, element%type)
-    !!$omp target
-    stat = ElementInfoVec( Element, Nodes, ngp, IP % U, IP % V, IP % W, detJ, &
-         SIZE(Basis,2), Basis, dBasisdx )
-    !!$omp end target
-    !!$omp end target data
+    stop
+    !$omp target data map(to:element, element%type)
+    !$omp target
+    stat = ElementInfoVec( Element, Nodes, ngp, IP % U, IP % V, IP % W, detJ, SIZE(Basis,2), Basis, dBasisdx )
+    !$omp end target
+    !$omp end target data
 
     ! Compute actual integration weights (recycle the memory space of DetJ)
     DO t=1,ngp
       DetJ(t) = IP % s(t) * Detj(t)
     END DO
 
-
-    !CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, STIFF, DiffCoeff )
-
-    !$omp target data map(to: t, ngp, nd, dBasisdx, detj, DiffCoeff, element, element% type) map(tofrom:stiff)
+    !!$omp target data map(to: ngp, nd, dBasisdx, detj, DiffCoeff) map(tofrom:stiff)
     !$omp target
-    !print *, omp_is_initial_device()
-    !CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, STIFF, DiffCoeff )
-    CALL LinearForms_GradUdotGradU(ngp, nd, Element % type % dimension, dBasisdx, DetJ, STIFF, DiffCoeff )
-    !CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
+    ! CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, STIFF, DiffCoeff )
+    CALL LinearForms_GradUdotGradU(ngp, nd, 3, dBasisdx, DetJ, STIFF, DiffCoeff )
+    CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
     !$omp end target
-    !$omp end target data
-
-    stop
-
+    !!$omp end target data
+ 
+    
     ! DEBUG
     !IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE,UElement=Element)
     CALL CondensateP( nd-nb, nb, STIFF, FORCE )
@@ -428,7 +509,7 @@ CONTAINS
     TYPE(ValueHandle_t), SAVE :: Flux_h, Robin_h, Ext_h
 
     SAVE Nodes
-    !!$OMP THREADPRIVATE(Nodes,Flux_h,Robin_h,Ext_h)
+    !$OMP THREADPRIVATE(Nodes,Flux_h,Robin_h,Ext_h)
 !------------------------------------------------------------------------------
     BC => GetBC(Element)
     IF (.NOT.ASSOCIATED(BC) ) RETURN
