@@ -1,3 +1,82 @@
+module mylinearforms
+  !USE Types, only: dp, VECTOR_BLOCK_LENGTH, VECTOR_SMALL_THRESH
+
+  INTEGER, PARAMETER :: dp = SELECTED_REAL_KIND(12) 
+  INTEGER, PARAMETER :: VECTOR_BLOCK_LENGTH = 128                                                                                                                                                                                                                                                                                                      
+  INTEGER, PARAMETER :: VECTOR_SMALL_THRESH = 9                                                                                                                                                                                                                                                                                                        
+
+  PUBLIC :: LinearForms_GradUdotGradU
+  
+   !!$omp declare target (LinearForms_GradUdotGradU)
+
+   !!$omp declare target to(LinearForms_GradUdotGradU)
+contains
+  SUBROUTINE LinearForms_GradUdotGradU(m, n, dim, GradU, weight, G, alpha)
+    implicit none
+    INTEGER, INTENT(IN) :: m, n, dim
+    REAL(KIND=dp) CONTIG, INTENT(IN) :: GradU(:,:,:), weight(:)
+    REAL(KIND=dp) CONTIG, INTENT(INOUT) :: G(:,:)
+    REAL(KIND=dp) CONTIG, INTENT(IN), OPTIONAL :: alpha(:)
+
+    REAL(KIND=dp) :: wrk(VECTOR_BLOCK_LENGTH,n)
+    INTEGER :: i, ii, iin, j, l, k, kk, ldbasis, ldwrk, ldk, blklen
+    LOGICAL :: noAlphaWeight
+
+    ldbasis = SIZE(GradU,1)
+    ldwrk = SIZE(wrk,1)
+    ldk = SIZE(G,1)
+
+    noAlphaWeight = .TRUE.
+    IF (PRESENT(alpha)) noAlphaWeight = .FALSE.
+
+    DO ii=1,m,VECTOR_BLOCK_LENGTH
+      iin=MIN(ii+VECTOR_BLOCK_LENGTH-1,m)
+      blklen=iin-ii+1
+      
+      IF (blklen < VECTOR_SMALL_THRESH) THEN
+        ! Do not attempt to call BLAS for small cases to avoid preprocessing overhead
+        IF (noAlphaWeight) THEN
+          DO j=1,n
+            DO i=1,n
+              DO k=1,dim
+                DO l=ii,iin
+                  G(i,j) = G(i,j) + GradU(l,i,k)*GradU(l,j,k)*weight(l)
+                END DO
+              END DO
+            END DO
+          END DO
+        ELSE
+          DO j=1,n
+            DO i=1,n
+              DO k=1,dim
+                DO l=ii,iin
+                  G(i,j) = G(i,j) + GradU(l,i,k)*GradU(l,j,k)*weight(l)*alpha(l)
+                END DO
+              END DO
+            END DO
+          END DO
+        END IF
+      ELSE
+        DO k=1, dim
+          IF (noAlphaWeight) THEN
+            DO j=1,n
+              DO i=ii,iin
+                wrk(i-ii+1,j)=weight(i)*GradU(i,j,k)
+              END DO
+            END DO
+          ELSE
+            DO j=1,n
+              DO i=ii,iin
+                wrk(i-ii+1,j)=weight(i)*alpha(i)*GradU(i,j,k)
+              END DO
+            END DO
+          END IF
+        END DO
+      END IF
+    END DO ! Vector blocks
+  END SUBROUTINE LinearForms_GradUdotGradU
+end module mylinearforms
+
 !-----------------------------------------------------------------------------
 !> A prototype solver for advection-diffusion-reaction equation.
 !> This equation is generic and intended for education purposes
@@ -28,6 +107,9 @@ END SUBROUTINE AdvDiffSolver_Init
 SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
   USE DefUtils
+  #ifdef _OPENMP
+  USE OMP_LIB
+  #endif
 
   IMPLICIT NONE
 !------------------------------------------------------------------------------
@@ -44,6 +126,8 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state, MaxNumNodes
   LOGICAL :: Found, VecAsm, InitHandles
   integer, allocatable :: n_active_in_col(:)
+  integer :: initial_device
+
 
   type :: elem_ptr
     type(Element_t), pointer :: p
@@ -87,6 +171,11 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   CALL ResetTimer( Caller//'BulkAssembly' )
 
+  !$omp target
+  initial_device = omp_is_initial_device()
+  !$omp end target
+
+  print *, 'initial_device:', initial_device
 
   nColours = GetNOFColours(Solver)
 
@@ -98,22 +187,18 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     allocate(elem_lists(col) % elements(active))
   end do
 
-  !$omp target enter data map(to:solver%mesh%elements)
-  !$omp target enter data map(to:elem_lists)
-
   !! Tabulate elements and their ndofs/nnodes/nb 
   nColours = GetNOFColours(Solver)
-  !$OMP PARALLEL &
-  !$OMP SHARED(Active, Solver, nColours, VecAsm, elem_lists) &
-  !$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
-  !$OMP REDUCTION(max:MaxNumNodes) DEFAULT(none)
+  !!$OMP PARALLEL &
+  !!$OMP SHARED(Active, Solver, nColours, VecAsm, elem_lists) &
+  !!$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
+  !!$OMP REDUCTION(max:MaxNumNodes) DEFAULT(none)
   do col=1,ncolours
-    !$OMP SINGLE
+    !!$OMP SINGLE
     active = GetNOFActive(Solver)
-    !$omp target enter data map(to:elem_lists(col) % elements)
-    !$OMP END SINGLE
+    !!$OMP END SINGLE
 
-    !$OMP DO
+    !!$OMP DO
     do t=1,active
       Element => GetActiveElement(t)
       elem_lists(col) % elements(t) % p => Element
@@ -122,9 +207,9 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
       elem_lists(col) % elements(t) % nb = GetElementNOFBDOFs(Element)
       MaxNumNodes = max(MaxNumNodes,elem_lists(col) % elements(t) % n)
     end do
-    !$OMP END DO
+    !!$OMP END DO
   end do
-  !$OMP END PARALLEL
+  !!$OMP END PARALLEL
 
   CALL CheckTimer(Caller//'BulkAssembly', Delete=.TRUE.)
 
@@ -156,18 +241,18 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   CALL ResetTimer(Caller//'BCAssembly')
 
   !! don't touch boundary stuff yet
-  !$OMP PARALLEL &
-  !$OMP SHARED(Active, Solver, nColours, VecAsm) &
-  !$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
-  !$OMP REDUCTION(+:totelem) DEFAULT(NONE)
+  !!$OMP PARALLEL &
+  !!$OMP SHARED(Active, Solver, nColours, VecAsm) &
+  !!$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
+  !!$OMP REDUCTION(+:totelem) DEFAULT(NONE)
   DO col=1,nColours
-    !$OMP SINGLE
+    !!$OMP SINGLE
     CALL Info('ModelPDEthreaded','Assembly of boundary colour: '//I2S(col),Level=10)
     Active = GetNOFBoundaryActive(Solver)
-    !$OMP END SINGLE
+    !!$OMP END SINGLE
 
        InitHandles = .TRUE. 
-       !$OMP DO
+       !!$OMP DO
        DO t=1,Active
           Element => GetBoundaryElement(t)
           ! WRITE (*,*) Element % ElementIndex
@@ -179,9 +264,9 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
              CALL LocalMatrixBC(  Element, n, nd+nb, nb, VecAsm, InitHandles )
           END IF
        END DO
-       !$OMP END DO
+       !!$OMP END DO
     END DO
-    !$OMP END PARALLEL
+    !!$OMP END PARALLEL
 
     CALL CheckTimer(Caller//'BCAssembly',Delete=.TRUE.)
         
@@ -207,8 +292,11 @@ CONTAINS
   SUBROUTINE LocalMatrixVec( Element, n, nd, nb, VecAsm )
 !------------------------------------------------------------------------------
     USE LinearForms
+    !use mylinearforms
     USE Integration
     use iso_c_binding
+
+
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: n, nd, nb
     TYPE(Element_t), POINTER:: Element
@@ -225,7 +313,7 @@ CONTAINS
     TYPE(GaussIntegrationPoints_t) :: IP
     TYPE(Nodes_t), SAVE :: Nodes
     LOGICAL, SAVE :: FirstTime=.TRUE.
-    
+
     !!$OMP THREADPRIVATE(Basis, dBasisdx, DetJ, &
     !!$OMP               MASS, STIFF, FORCE, Nodes, &
     !!$OMP               SourceCoeff, DiffCoeff, ReactCoeff, TimeCoeff, &
@@ -236,7 +324,7 @@ CONTAINS
 
 
 
-    
+
     dim = CoordinateSystemDimension()
     IP = GaussPoints( Element )
     ngp = IP % n
@@ -262,7 +350,7 @@ CONTAINS
       FirstTime=.FALSE.
     END IF
 
-      
+
     CALL GetElementNodesVec( Nodes, UElement=Element )
 
     ! Initialize
@@ -276,33 +364,35 @@ CONTAINS
 
     print *, element%bodyid
     !!$omp target map(concrete_element, concrete_element % type, concrete_element % type % dimension)
-    !$omp target map(to: element, element%bodyid, element%type, element%type%dimension)
-    print *, element
-    !print *, element%type%dimension
-    !$omp end target
+    !!$omp target map(to: element, element%bodyid, element%type, element%type%dimension)
+    !print *, element
+    print *, element%type%dimension
+    !!$omp end target
 
     stop
-    !$omp target data map(to:element, element%type)
-    !$omp target
+    !!$omp target data map(to:element, element%type)
+    !!$omp target
     stat = ElementInfoVec( Element, Nodes, ngp, IP % U, IP % V, IP % W, detJ, &
          SIZE(Basis,2), Basis, dBasisdx )
-    !$omp end target
-    !$omp end target data
+    !!$omp end target
+    !!$omp end target data
 
     ! Compute actual integration weights (recycle the memory space of DetJ)
     DO t=1,ngp
       DetJ(t) = IP % s(t) * Detj(t)
     END DO
 
-    !!$omp target data map(to: ngp, nd, dBasisdx, detj, DiffCoeff) map(tofrom:stiff)
-    !$omp target
-    ! CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, STIFF, DiffCoeff )
-    CALL LinearForms_GradUdotGradU(ngp, nd, 3, dBasisdx, DetJ, STIFF, DiffCoeff )
-    CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
-    !$omp end target
+
+    !CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, STIFF, DiffCoeff )
+    !!$omp target data map(to: t, ngp, nd, dBasisdx, detj, DiffCoeff, element, element% type) map(tofrom:stiff)
+    !!$omp target
+    !print *, omp_is_initial_device()
+    !CALL LinearForms_GradUdotGradU(ngp, nd, 3, dBasisdx, DetJ, STIFF, DiffCoeff )
+    !CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
+    !!$omp end target
     !!$omp end target data
- 
-    
+
+
     ! DEBUG
     !IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE,UElement=Element)
     CALL CondensateP( nd-nb, nb, STIFF, FORCE )
@@ -335,7 +425,7 @@ CONTAINS
     TYPE(ValueHandle_t), SAVE :: Flux_h, Robin_h, Ext_h
 
     SAVE Nodes
-    !$OMP THREADPRIVATE(Nodes,Flux_h,Robin_h,Ext_h)
+    !!$OMP THREADPRIVATE(Nodes,Flux_h,Robin_h,Ext_h)
 !------------------------------------------------------------------------------
     BC => GetBC(Element)
     IF (.NOT.ASSOCIATED(BC) ) RETURN
