@@ -1,10 +1,10 @@
 !------------------------------------------------------------------------------
 SUBROUTINE MiniPoisson( dt,TransientSimulation )
 !------------------------------------------------------------------------------
-USE DefUtils
-  #ifdef _OPENMP
+USE Types
+#ifdef _OPENMP
   USE OMP_LIB
-  #endif
+#endif
 
   implicit none
 !------------------------------------------------------------------------------
@@ -24,7 +24,7 @@ USE DefUtils
   INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state, MaxNumNodes
   LOGICAL :: Found, VecAsm, InitHandles
   integer, allocatable :: n_active_in_col(:)
-  integer :: initial_device
+  LOGICAL :: initial_device
 
 
   !$omp target map(from: initial_device)

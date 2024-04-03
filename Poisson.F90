@@ -1,15 +1,15 @@
 module mylinearforms
-  !USE Types, only: dp, VECTOR_BLOCK_LENGTH, VECTOR_SMALL_THRESH
+  USE Types, only: dp, VECTOR_BLOCK_LENGTH, VECTOR_SMALL_THRESH
 
-  INTEGER, PARAMETER :: dp = SELECTED_REAL_KIND(12) 
-  INTEGER, PARAMETER :: VECTOR_BLOCK_LENGTH = 128                                                                                                                                                                                                                                                                                                      
-  INTEGER, PARAMETER :: VECTOR_SMALL_THRESH = 9                                                                                                                                                                                                                                                                                                        
+  !INTEGER, PARAMETER :: dp = SELECTED_REAL_KIND(12) 
+  !INTEGER, PARAMETER :: VECTOR_BLOCK_LENGTH = 128                                                                                                                                                                                                                                                                                                      
+  !INTEGER, PARAMETER :: VECTOR_SMALL_THRESH = 9                                                                                                                                                                                                                                                                                                        
 
   PUBLIC :: LinearForms_GradUdotGradU
   
    !!$omp declare target (LinearForms_GradUdotGradU)
 
-   !!$omp declare target to(LinearForms_GradUdotGradU)
+   !$omp declare target to(LinearForms_GradUdotGradU)
 contains
   SUBROUTINE LinearForms_GradUdotGradU(m, n, dim, GradU, weight, G, alpha)
     implicit none
@@ -107,9 +107,9 @@ END SUBROUTINE AdvDiffSolver_Init
 SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
   USE DefUtils
-  #ifdef _OPENMP
+#ifdef _OPENMP
   USE OMP_LIB
-  #endif
+#endif
 
   IMPLICIT NONE
 !------------------------------------------------------------------------------
@@ -126,7 +126,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state, MaxNumNodes
   LOGICAL :: Found, VecAsm, InitHandles
   integer, allocatable :: n_active_in_col(:)
-  integer :: initial_device
+  logical :: initial_device
 
 
   type :: elem_ptr
@@ -364,12 +364,12 @@ CONTAINS
 
     print *, element%bodyid
     !!$omp target map(concrete_element, concrete_element % type, concrete_element % type % dimension)
-    !!$omp target map(to: element, element%bodyid, element%type, element%type%dimension)
+    !$omp target map(to: element, element%bodyid, element%type, element%type%dimension)
     !print *, element
     print *, element%type%dimension
-    !!$omp end target
+    !$omp end target
 
-    stop
+
     !!$omp target data map(to:element, element%type)
     !!$omp target
     stat = ElementInfoVec( Element, Nodes, ngp, IP % U, IP % V, IP % W, detJ, &
@@ -384,14 +384,17 @@ CONTAINS
 
 
     !CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, STIFF, DiffCoeff )
-    !!$omp target data map(to: t, ngp, nd, dBasisdx, detj, DiffCoeff, element, element% type) map(tofrom:stiff)
-    !!$omp target
-    !print *, omp_is_initial_device()
-    !CALL LinearForms_GradUdotGradU(ngp, nd, 3, dBasisdx, DetJ, STIFF, DiffCoeff )
-    !CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
-    !!$omp end target
-    !!$omp end target data
 
+    !$omp target data map(to: t, ngp, nd, dBasisdx, detj, DiffCoeff, element, element% type) map(tofrom:stiff)
+    !$omp target
+    !print *, omp_is_initial_device()
+    !CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, STIFF, DiffCoeff )
+    CALL LinearForms_GradUdotGradU(ngp, nd, Element % type % dimension, dBasisdx, DetJ, STIFF, DiffCoeff )
+    !CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
+    !$omp end target
+    !$omp end target data
+
+    stop
 
     ! DEBUG
     !IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE,UElement=Element)
