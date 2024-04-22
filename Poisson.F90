@@ -10,7 +10,7 @@ end function
 
 !call myElementMetric(nd,Nodes,dim,Metric,DetG,dBasisdx(i,:,:),LtoGMap)
 subroutine myElementMetric(nDOFs,Nodes,dim,Metric,DetG,dLBasisdx,LtoGMap)
-
+!$omp declare target
 use Types
 use DefUtils
 implicit none
@@ -141,7 +141,8 @@ end subroutine  myElementMetric
 !------------------------------------------------------------------------------
 SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
-USE DefUtils
+  USE DefUtils
+  USE Integration
 
   IMPLICIT NONE
 !------------------------------------------------------------------------------
@@ -156,8 +157,12 @@ USE DefUtils
   REAL(KIND=dp) :: Norm
   INTEGER :: n, nb, nd, t, active
   INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state, MaxNumNodes
+  INTEGER :: ngp, i, dim
   LOGICAL :: Found, VecAsm, InitHandles
   integer, allocatable :: n_active_in_col(:)
+
+  REAL(KIND=dp), ALLOCATABLE :: refBasis(:,:), refdBasisdx(:,:,:)
+  TYPE(GaussIntegrationPoints_t) :: refIP
 
   type :: elem_ptr
     type(Element_t), pointer :: p
@@ -177,7 +182,6 @@ USE DefUtils
   CALL Info(Caller,'Solving generic advection-diffusion-reaction PDE')
 
   CALL DefaultStart()
-
   
   
   maxiter = ListGetInteger( GetSolverParams(),&
@@ -204,16 +208,16 @@ USE DefUtils
 
   nColours = GetNOFColours(Solver)
 
-  allocate(elem_lists(nColours))
-  allocate(n_active_in_col(nColours))
+  allocate(elem_lists(nColours)) ! TODO: deallocate too
+  allocate(n_active_in_col(nColours)) ! TODO: deallocate too
 
   do col = 1, nColours
     active = GetNOFActive(Solver)
     allocate(elem_lists(col) % elements(active))
   end do
 
-  !$omp target enter data map(to:solver%mesh%elements)
-  !$omp target enter data map(to:elem_lists)
+  !!$omp target enter data map(to:solver%mesh%elements)
+  !!$omp target enter data map(to:elem_lists)
 
   !! Tabulate elements and their ndofs/nnodes/nb 
   nColours = GetNOFColours(Solver)
@@ -224,7 +228,7 @@ USE DefUtils
   do col=1,ncolours
     !$OMP SINGLE
     active = GetNOFActive(Solver)
-    !$omp target enter data map(to:elem_lists(col) % elements)
+    !!$omp target enter data map(to:elem_lists(col) % elements)
     !$OMP END SINGLE
 
     !$OMP DO
@@ -244,10 +248,27 @@ USE DefUtils
 
   nColours = GetNOFColours(Solver)
 
+  print *, '==BASIS FUNCTION VALUES========================='
+
+  Element => elem_lists(1) % elements(1) % p
+  dim = CoordinateSystemDimension()
+  refIP = GaussPoints( Element )
+  ngp = refIP % n
+  nd = GetElementNOFDOFs(Element)
+  print *, 'NGP:', ngp
+  allocate(refbasis(ngp, nd), refdbasisdx(ngp, nd, 3))
+  do i=1,ngp
+    call NodalBasisFunctions(nd, refBasis(i,:), element, refIP%u(i), refIP%v(i), refIP%w(i))
+    call NodalFirstDerivatives(nd, refdBasisdx(i,:,:), element, refIP%u(i), refIP%v(i), refIP%w(i))
+    write (*,'(12F7.3)') refbasis(i,:)
+  end do
+
+  print *, '==dbasis function values========================'
+
   DO col=1,nColours
 
-    CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=1)
-    Active = GetNOFActive(Solver)
+    CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=1) ! TODO: this goes away
+    Active = GetNOFActive(Solver) ! TODO: this goes away
 
     DO t=1,Active
       totelem = totelem + 1
@@ -316,7 +337,7 @@ USE DefUtils
   
 CONTAINS
 
-! Assembly of the matrix entries arising from the bulk elements. SIMD version.
+! Assembly of the matrix entries arising from the bulk elements. Offload compatible version
 !------------------------------------------------------------------------------
   SUBROUTINE LocalMatrixVec( Element, n, nd, nb, VecAsm )
 !------------------------------------------------------------------------------
@@ -336,23 +357,14 @@ CONTAINS
     REAL(KIND=dp), SAVE, ALLOCATABLE  :: VeloCoeff(:,:)
     REAL(KIND=dp), target :: LtoGMap(3,3), metric(3,3), detg
     LOGICAL :: Stat,Found
-    INTEGER :: i,t,p,q,dim,ngp,allocstat
+    INTEGER :: j,k,m,i,t,p,q,dim,ngp,allocstat
     TYPE(GaussIntegrationPoints_t) :: IP
     TYPE(Nodes_t), SAVE :: Nodes
     type(Nodes_t), SAVE :: refNodes
     type(ElementType_t) :: refElementType
     LOGICAL, SAVE :: FirstTime=.TRUE.
     real(KIND=dp) :: dLBasisdx(nd, 3)
-    
-    !!$OMP THREADPRIVATE(Basis, dBasisdx, DetJ, &
-    !!$OMP               MASS, STIFF, FORCE, Nodes, &
-    !!$OMP               SourceCoeff, DiffCoeff, ReactCoeff, TimeCoeff, &
-    !!$OMP               ConvCoeff, Velo1Coeff, Velo2Coeff, Velo3Coeff, VeloCoeff )
-    !DIR$ ATTRIBUTES ALIGN:64 :: Basis, dBasisdx, DetJ
-    !DIR$ ATTRIBUTES ALIGN:64 :: MASS, STIFF, FORCE
 !------------------------------------------------------------------------------
-
-
 
     
     dim = CoordinateSystemDimension()
@@ -406,6 +418,7 @@ CONTAINS
 
     ! TODO: wip loop over integration points and calculate myElementMetric
     
+    ! Move this outside target region
     print *, '==basis function values========================='
     do i=1,ngp
       call NodalBasisFunctions(nd, Basis(i,:), element, IP%u(i), IP%v(i), IP%w(i))
@@ -415,6 +428,7 @@ CONTAINS
     print *, '==dbasis function values========================'
 
     do i = 1,ngp
+      write (*, '(I3)') i
       write (*,'(A)', advance='no') 'dx1 '
       write (*,'(12F8.3)') dBasisdx(i,:,1)
       write (*,'(A)', advance='no') 'dx2 '
@@ -425,16 +439,33 @@ CONTAINS
     print *, '================================================'
 
     do i=1,ngp
-      dLBasisdx(:,:) = dBasisdx(i,:,:)
-      write (*,'(12F8.3)') dLBasisdx(:,3)
-      call myElementMetric(nd,Nodes,dim,Metric,DetG,dLBasisdx,LtoGMap)
-      dbasisdx(i,:,:) = matmul(dlbasisdx, ltogmap)
+      do j = 1,dim
+        do m = 1,nd
+          dLBasisdx(m,j) = dBasisdx(i,m,j)
+        end do
+      end do
+      call myElementMetric(nd,Nodes,dim,Metric,DetG,dbasisdx(i,:,:),LtoGMap)
+    write (*,'(e10.3)') sqrt(detG)
+
+      dbasisdx(i,:,:) = 0_dp
+      do m = 1,nd
+        do j=1,dim
+          do k=1,dim
+            dbasisdx(i,m,j) = dbasisdx(i,m,j) + dLbasisdx(m,k)*LtoGMap(j,k)
+          end do 
+        end do
+      end do
+      write (*, '(I3)') i
+      write (*,'(A)', advance='no') 'dx1 '
+      write (*,'(12F8.3)') dBasisdx(i,:,1)
+      write (*,'(A)', advance='no') 'dx2 '
+      write (*,'(12F8.3)') dBasisdx(i,:,2)
+      write (*,'(A)', advance='no') 'dx3 '
       write (*,'(12F8.3)') dBasisdx(i,:,3)
     end do
 
-    write (*,'(12F7.3)') detG
 
-    stop
+    ! stop
 
     !SUBROUTINE GetRefPElementNodes(Element, U, V, W)
     !TYPE(ElementType_t) :: Element
@@ -456,12 +487,24 @@ CONTAINS
     !print *, element%type%dimension
     !$omp end target
 
-    stop
     !$omp target data map(to:element, element%type)
     !$omp target
+    dbasisdx = 0._dp
     stat = ElementInfoVec( Element, Nodes, ngp, IP % U, IP % V, IP % W, detJ, SIZE(Basis,2), Basis, dBasisdx )
+    print *, '==dbasis function values the old way============'
+    do i = 1,ngp
+      write (*, '(I3)') i
+      write (*,'(A)', advance='no') 'dx1 '
+      write (*,'(12F8.3)') dBasisdx(i,:,1)
+      write (*,'(A)', advance='no') 'dx2 '
+      write (*,'(12F8.3)') dBasisdx(i,:,2)
+      write (*,'(A)', advance='no') 'dx3 '
+      write (*,'(12F8.3)') dBasisdx(i,:,3)
+    end do
+    print *, '================================================'
     !$omp end target
     !$omp end target data
+    stop
 
     ! Compute actual integration weights (recycle the memory space of DetJ)
     DO t=1,ngp
