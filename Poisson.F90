@@ -161,11 +161,15 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   LOGICAL :: Found, VecAsm, InitHandles
   integer, allocatable :: n_active_in_col(:)
 
+#ifdef _OPENMP
+  LOGICAL :: initial_device
+#endif
   REAL(KIND=dp), ALLOCATABLE :: refBasis(:,:), refdBasisdx(:,:,:)
   TYPE(GaussIntegrationPoints_t) :: refIP
 
   type :: elem_ptr
     type(Element_t), pointer :: p
+    type(Nodes_t) :: nodes
     integer :: n, nd, nb                        ! nof nodes, nof dofs, nofbdofs
   end type
 
@@ -205,6 +209,11 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   CALL ResetTimer( Caller//'BulkAssembly' )
 
+  !$omp target
+  initial_device = omp_is_initial_device()
+  !$omp end target
+
+  print *, 'initial_device:', initial_device
 
   nColours = GetNOFColours(Solver)
 
@@ -238,6 +247,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
       elem_lists(col) % elements(t) % n = GetElementNOFNodes(Element)
       elem_lists(col) % elements(t) % nd = GetElementNOFDOFs(Element)
       elem_lists(col) % elements(t) % nb = GetElementNOFBDOFs(Element)
+      CALL GetElementNodesVec( elem_lists(col) % elements(t) % nodes,  elem_lists(col) % elements(t) % p)
       MaxNumNodes = max(MaxNumNodes,elem_lists(col) % elements(t) % n)
     end do
     !$OMP END DO
@@ -276,7 +286,9 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
       n = elem_lists(col) % elements(t) % n
       nd = elem_lists(col) % elements(t) % nd
       nb = elem_lists(col) % elements(t) % nb
-      CALL LocalMatrixVec(  Element, n, nd+nb, nb, VecAsm )
+      !!$omp target
+      CALL LocalMatrixVec(  Element, n, nd+nb, nb, VecAsm, elem_lists(col)% elements(t) % nodes)
+      !!$omp end target
     END DO
   END DO
 
@@ -339,7 +351,7 @@ CONTAINS
 
 ! Assembly of the matrix entries arising from the bulk elements. Offload compatible version
 !------------------------------------------------------------------------------
-  SUBROUTINE LocalMatrixVec( Element, n, nd, nb, VecAsm )
+  SUBROUTINE LocalMatrixVec( Element, n, nd, nb, VecAsm, Nodes)
 !------------------------------------------------------------------------------
     USE LinearForms
     USE Integration
@@ -348,7 +360,7 @@ CONTAINS
     INTEGER, INTENT(IN) :: n, nd, nb
     TYPE(Element_t), POINTER:: Element
     LOGICAL, INTENT(IN) :: VecAsm
-    TYPE(element_t) :: refElement
+    TYPE(Nodes_t), intent(in) :: Nodes
 !------------------------------------------------------------------------------
     REAL(KIND=dp), ALLOCATABLE, SAVE :: Basis(:,:),dBasisdx(:,:,:), DetJ(:)
     REAL(KIND=dp), ALLOCATABLE, SAVE :: MASS(:,:), STIFF(:,:), FORCE(:)
@@ -359,7 +371,6 @@ CONTAINS
     LOGICAL :: Stat,Found
     INTEGER :: j,k,m,i,t,p,q,dim,ngp,allocstat
     TYPE(GaussIntegrationPoints_t) :: IP
-    TYPE(Nodes_t), SAVE :: Nodes
     type(Nodes_t), SAVE :: refNodes
     type(ElementType_t) :: refElementType
     LOGICAL, SAVE :: FirstTime=.TRUE.
@@ -399,14 +410,13 @@ CONTAINS
     END IF
 
       
-    CALL GetElementNodesVec( Nodes, UElement=Element )
+    !CALL GetElementNodesVec( Nodes, UElement=Element )
     print *, '==Element nodes================================='
     write (*,'(12F7.3)') nodes % x(1:nd)
     write (*,'(12F7.3)') nodes % y(1:nd)
     write (*,'(12F7.3)') nodes % z(1:nd)
     print *, '================================================'
 
-    refElement = element
 
     !call GetRefPElementNodes(Element%type, refnodes % x, refnodes % y, refnodes % z)
     !INTEGER :: nDOFs                !< Number of active nodes in element
