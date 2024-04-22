@@ -1,19 +1,11 @@
 
-function MakeReferenceElement() result(element)
-use Types
-implicit none
-
-type(element_t) :: element
-type(nodes_t) :: nodes
-
-end function
 
 !call myElementMetric(nd,Nodes,dim,Metric,DetG,dBasisdx(i,:,:),LtoGMap)
 subroutine myElementMetric(nDOFs,Nodes,dim,Metric,DetG,dLBasisdx,LtoGMap)
-!$omp declare target
 use Types
 use DefUtils
 implicit none
+!$omp declare target
 !------------------------------------------------------------------------------
 INTEGER :: nDOFs, dim           !< Number of active nodes in element, dimension of space
 TYPE(Nodes_t)    :: Nodes       !< Element nodal coordinates
@@ -357,7 +349,7 @@ CONTAINS
     USE Integration
     use iso_c_binding
     IMPLICIT NONE
-  !$omp declare target to(LocalMatrixVec)
+!$omp declare target
 
 
     INTEGER, INTENT(IN) :: n, nd, nb
@@ -400,25 +392,21 @@ CONTAINS
       Velo1Coeff=0.0_dp
       Velo2Coeff=0.0_dp
       Velo3Coeff=0.0_dp
-      IF (allocstat /= 0) THEN
-        CALL Fatal(Caller,'Local storage allocation failed')
-      END IF
       FirstTime=.FALSE.
       allocate(refnodes %x(maxnumnodes), &
 	      refnodes %y(maxnumnodes), &
 	      refnodes %z(maxnumnodes), stat=allocstat)
-      IF (allocstat /= 0) THEN
-        CALL Fatal(Caller,'Local storage allocation failed')
-      END IF
     END IF
 
       
     !CALL GetElementNodesVec( Nodes, UElement=Element )
+#ifdef DEBUGPRINT
     print *, '==Element nodes================================='
     write (*,'(12F7.3)') nodes % x(1:nd)
     write (*,'(12F7.3)') nodes % y(1:nd)
     write (*,'(12F7.3)') nodes % z(1:nd)
     print *, '================================================'
+#endif
 
 
     !call GetRefPElementNodes(Element%type, refnodes % x, refnodes % y, refnodes % z)
@@ -432,14 +420,21 @@ CONTAINS
     ! TODO: wip loop over integration points and calculate myElementMetric
     
     ! Move this outside target region
+#ifdef DEBUGPRINT
     print *, '==basis function values========================='
+#endif
     do i=1,ngp
       call NodalBasisFunctions(nd, Basis(i,:), element, IP%u(i), IP%v(i), IP%w(i))
       call NodalFirstDerivatives(nd, dBasisdx(i,:,:), element, IP%u(i), IP%v(i), IP%w(i))
+#ifdef DEBUGPRINT
       write (*,'(12F7.3)') basis(i,:)
+#endif
     end do
+#ifdef DEBUGPRINT
     print *, '==dbasis function values========================'
+#endif
 
+#ifdef DEBUGPRINT
     do i = 1,ngp
       write (*, '(I3)') i
       write (*,'(A)', advance='no') 'dx1 '
@@ -450,6 +445,7 @@ CONTAINS
       write (*,'(12F8.3)') dBasisdx(i,:,3)
     end do
     print *, '================================================'
+#endif
 
     do i=1,ngp
       do j = 1,dim
@@ -458,7 +454,9 @@ CONTAINS
         end do
       end do
       call myElementMetric(nd,Nodes,dim,Metric,DetG,dbasisdx(i,:,:),LtoGMap)
+#ifdef DEBUGPRINT
     write (*,'(e10.3)') sqrt(detG)
+#endif
 
       dbasisdx(i,:,:) = 0_dp
       do m = 1,nd
@@ -468,6 +466,7 @@ CONTAINS
           end do 
         end do
       end do
+#ifdef DEBUGPRINT
       write (*, '(I3)') i
       write (*,'(A)', advance='no') 'dx1 '
       write (*,'(12F8.3)') dBasisdx(i,:,1)
@@ -475,6 +474,7 @@ CONTAINS
       write (*,'(12F8.3)') dBasisdx(i,:,2)
       write (*,'(A)', advance='no') 'dx3 '
       write (*,'(12F8.3)') dBasisdx(i,:,3)
+#endif
     end do
 
 
@@ -493,16 +493,13 @@ CONTAINS
     ! Compute basis function values and derivatives at integration points
     !--------------------------------------------------------------
 
-    print *, element%bodyid
-    !!$omp target map(concrete_element, concrete_element % type, concrete_element % type % dimension)
-    !$omp target map(to: element, element%bodyid, element%type, element%type%dimension)
-    !    print *, element
-    !print *, element%type%dimension
-    !$omp end target
 
-    !$omp target data map(to:element, element%type)
-    !$omp target
+#ifdef DEBUGPRINT
+    print *, element%bodyid
+#endif
+
     dbasisdx = 0._dp
+#ifdef DEBUGPRINT
     stat = ElementInfoVec( Element, Nodes, ngp, IP % U, IP % V, IP % W, detJ, SIZE(Basis,2), Basis, dBasisdx )
     print *, '==dbasis function values the old way============'
     do i = 1,ngp
@@ -515,8 +512,7 @@ CONTAINS
       write (*,'(12F8.3)') dBasisdx(i,:,3)
     end do
     print *, '================================================'
-    !$omp end target
-    !$omp end target data
+#endif
     stop
 
     ! Compute actual integration weights (recycle the memory space of DetJ)
@@ -525,18 +521,18 @@ CONTAINS
     END DO
 
     !!$omp target data map(to: ngp, nd, dBasisdx, detj, DiffCoeff) map(tofrom:stiff)
-    !$omp target
+    !!$omp target
     ! CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, STIFF, DiffCoeff )
-    CALL LinearForms_GradUdotGradU(ngp, nd, 3, dBasisdx, DetJ, STIFF, DiffCoeff )
-    CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
-    !$omp end target
+    !CALL LinearForms_GradUdotGradU(ngp, nd, 3, dBasisdx, DetJ, STIFF, DiffCoeff )
+    !CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
+    !!$omp end target
     !!$omp end target data
  
     
     ! DEBUG
     !IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE,UElement=Element)
-    CALL CondensateP( nd-nb, nb, STIFF, FORCE )
-    CALL DefaultUpdateEquations(STIFF,FORCE,UElement=Element, VecAssembly=VecAsm)
+    !CALL CondensateP( nd-nb, nb, STIFF, FORCE )
+    !CALL DefaultUpdateEquations(STIFF,FORCE,UElement=Element, VecAssembly=VecAsm)
 !------------------------------------------------------------------------------
   END SUBROUTINE LocalMatrixVec
 !------------------------------------------------------------------------------
