@@ -1,36 +1,43 @@
 module hellomodule
 !use Types
-
-contains
-
-subroutine hello()
 #ifdef _OPENMP
-use omp_lib
+  use omp_lib
 #endif
-implicit none
-
-call subsubhello()
 
 contains
 
-subroutine subsubhello()
-integer :: num_devices
-logical :: initial_device
+  subroutine hello()
+  implicit none
+  logical :: initial_device
+  integer :: num_devices
 
-num_devices = omp_get_num_devices()
-print *, "Number of available devices", num_devices
 
-!$omp target map(from: initial_device)
-initial_device = omp_is_initial_device()
-!$omp end target
-if (initial_device) then
-  write(*,*) "Running on host"
-else
-  write(*,*) "Running on device"
-end if
+  !$omp target map(from: initial_device)
+  call subsubhello(initial_device, num_devices)
+  !$omp end target
 
-end subroutine subsubhello
+  num_devices = omp_get_num_devices()
+  print *, "Number of available devices", num_devices
+  if (initial_device) then
+    write(*,*) "Running on host"
+  else
+    write(*,*) "Running on device"
+  end if
 
-end subroutine
+  contains
+
+    subroutine subsubhello(idev, ndev)
+  use omp_lib
+    !$omp declare target to(subsubhello)
+    integer, intent(out) :: ndev
+    logical, intent(out) :: idev
+
+!    ndev = omp_get_num_devices()
+
+    idev = omp_is_initial_device()
+
+    end subroutine subsubhello
+
+  end subroutine
 
 end module hellomodule
