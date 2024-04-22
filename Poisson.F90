@@ -483,7 +483,7 @@ CONTAINS
     print *, element%bodyid
     !!$omp target map(concrete_element, concrete_element % type, concrete_element % type % dimension)
     !$omp target map(to: element, element%bodyid, element%type, element%type%dimension)
-    print *, element
+    !    print *, element
     !print *, element%type%dimension
     !$omp end target
 
