@@ -3,7 +3,7 @@ module LocalMV
 CONTAINS
 #ifdef BUILDLOCALMV
 
-SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refbasis, refdBasisdx, ip, ngp)
+SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, VecAsm, Nodes, dim, refbasis, refdBasisdx, ip, ngp)
 !------------------------------------------------------------------------------
     USE LinearForms
     USE Integration
@@ -17,23 +17,27 @@ SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refba
 
 
     INTEGER, INTENT(IN) :: n, nd, nb
-    TYPE(Element_t), POINTER:: Element
+    !TYPE(Element_t), POINTER:: Element
     LOGICAL, INTENT(IN) :: VecAsm
     TYPE(Nodes_t), intent(in) :: Nodes
     INTEGER :: dim
     real(kind=dp), intent(in) :: refbasis(:,:), refdbasisdx(:,:,:)
     TYPE(GaussIntegrationPoints_t), intent(in) :: IP
 !------------------------------------------------------------------------------
+#define nd_ 4
+#define ngp_ 4
     REAL(KIND=dp) :: Basis(ngp,nd)
     real(kind=dp) :: dBasisdx(ngp,nd,3), DetJ(ngp)
     REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd)
     REAL(KIND=dp) :: DiffCoeff(ngp), SourceCoeff(ngp)
-    REAL(KIND=dp), target :: LtoGMap(3,3), metric(3,3), detg
+    REAL(KIND=dp) :: LtoGMap(3,3), metric(3,3), detg
     LOGICAL :: Stat,Found
     INTEGER :: j,k,m,i,t,p,q,ngp,allocstat
 
     
+#ifdef DEBUGPRINT
     INTEGER :: round = 1 ! TODO
+#endif
     !type(ElementType_t) :: refElementType
     !LOGICAL, SAVE :: FirstTime=.TRUE.
     real(KIND=dp) :: dLBasisdx(nd, 3)
@@ -81,7 +85,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refba
       DetJ(t) = IP % s(t) * Detj(t)
     END DO
 
-    CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension, dBasisdx, DetJ, STIFF, DiffCoeff )
+    CALL LinearForms_GradUdotGradU(ngp, nd, dim, dBasisdx, DetJ, STIFF, DiffCoeff )
     CALL LinearForms_UdotF(ngp, nd, refBasis, DetJ, SourceCoeff, FORCE)
 
 #ifdef DEBUGPRINT
@@ -440,24 +444,26 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     ! CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=1) ! TODO: this goes away
     Active = GetNOFActive(Solver) ! TODO: this goes away
 
+    call ResetTimer( Caller//'ColorLoop')
     !$omp target teams
     !$omp distribute parallel do
     DO t=1,Active
-      totelem = totelem + 1
-      Element => elem_lists(col) % elements(t) % p
+      !totelem = totelem + 1
+      !Element => elem_lists(col) % elements(t) % p
       n = elem_lists(col) % elements(t) % n
       nd = elem_lists(col) % elements(t) % nd
       nb = elem_lists(col) % elements(t) % nb
-      CALL ModuleLocalMatrixVecSO(  Element, n, nd+nb, nb, VecAsm, &
+      CALL ModuleLocalMatrixVecSO(  n, nd+nb, nb, VecAsm, &
                                     elem_lists(col)% elements(t) % nodes, coorddim, &
                                     refbasis, refdBasisdx, refip, ngp)
     END DO
     !$omp end distribute parallel do
     !$omp end target teams
+    CALL CheckTimer(Caller//'ColorLoop',Delete=.TRUE.)
   END DO
 
     CALL CheckTimer(Caller//'BulkAssembly',Delete=.TRUE.)
-  !return
+  stop
   totelem = 0
 
   CALL DefaultFinishBulkAssembly()
