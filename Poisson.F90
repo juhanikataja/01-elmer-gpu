@@ -440,18 +440,20 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     ! CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=1) ! TODO: this goes away
     Active = GetNOFActive(Solver) ! TODO: this goes away
 
+    !$omp target teams
+    !$omp distribute parallel do
     DO t=1,Active
       totelem = totelem + 1
       Element => elem_lists(col) % elements(t) % p
       n = elem_lists(col) % elements(t) % n
       nd = elem_lists(col) % elements(t) % nd
       nb = elem_lists(col) % elements(t) % nb
-      !$omp target
       CALL ModuleLocalMatrixVecSO(  Element, n, nd+nb, nb, VecAsm, &
                                     elem_lists(col)% elements(t) % nodes, coorddim, &
                                     refbasis, refdBasisdx, refip, ngp)
-      !$omp end target
     END DO
+    !$omp end distribute parallel do
+    !$omp end target teams
   END DO
 
     CALL CheckTimer(Caller//'BulkAssembly',Delete=.TRUE.)
