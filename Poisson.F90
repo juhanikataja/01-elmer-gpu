@@ -3,23 +3,24 @@ module LocalMV
 CONTAINS
 #ifdef BUILDLOCALMV
 
-SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refbasis, refdBasisdx)
+SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refbasis, refdBasisdx, ip)
 !------------------------------------------------------------------------------
     USE LinearForms
     USE Integration
     !use iso_c_binding
-    use DefUtils ! TODO: defaultupdateequations is here but defutils may not be used due to threadprivate module variables if
+    !use DefUtils ! TODO: defaultupdateequations is here but defutils may not be used due to threadprivate module variables if
                  ! declare target is set
     IMPLICIT NONE
-!!$omp declare target
+!$omp declare target
 
 
     INTEGER, INTENT(IN) :: n, nd, nb
     TYPE(Element_t), POINTER:: Element
     LOGICAL, INTENT(IN) :: VecAsm
     TYPE(Nodes_t), intent(in) :: Nodes
-    real(kind=dp), intent(in) :: refbasis(:,:), refdbasisdx(:,:,:)
     INTEGER :: dim
+    real(kind=dp), intent(in) :: refbasis(:,:), refdbasisdx(:,:,:)
+    TYPE(GaussIntegrationPoints_t), intent(in) :: IP
 !------------------------------------------------------------------------------
     REAL(KIND=dp), ALLOCATABLE, SAVE :: Basis(:,:),dBasisdx(:,:,:), DetJ(:)
     REAL(KIND=dp), ALLOCATABLE, SAVE :: MASS(:,:), STIFF(:,:), FORCE(:)
@@ -32,16 +33,15 @@ SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refba
 
     
     INTEGER :: round = 1 ! TODO
-    TYPE(GaussIntegrationPoints_t) :: IP
-    type(ElementType_t) :: refElementType
+    !type(ElementType_t) :: refElementType
     LOGICAL, SAVE :: FirstTime=.TRUE.
     real(KIND=dp) :: dLBasisdx(nd, 3)
 !------------------------------------------------------------------------------
 
     
     !dim = CoordinateSystemDimension()
-    IP = GaussPoints( Element )
-    ngp = IP % n
+    !IP = GaussPoints( Element )
+    !ngp = IP % n
 
     ! THIS IS UGLY AND DIRTY - assuming all elements are same!
     IF (FirstTime) THEN
@@ -135,7 +135,7 @@ subroutine myElementMetric(nDOFs,Nodes,dim,Metric,DetG,dLBasisdx,LtoGMap)
 use Types, only: dp, nodes_t
 !use DefUtils
 implicit none
-!!$omp declare target
+!$omp declare target
 !------------------------------------------------------------------------------
 INTEGER :: nDOFs, dim           !< Number of active nodes in element, dimension of space
 TYPE(Nodes_t)    :: Nodes       !< Element nodal coordinates
@@ -243,6 +243,7 @@ end subroutine  myElementMetric
 
   SUBROUTINE InvertMatrix3x3( G,GI,detG )
     use Types, only: dp
+    !$omp declare target
 !------------------------------------------------------------------------------
     REAL(KIND=dp), INTENT(IN) :: G(3,3)
     REAL(KIND=dp), INTENT(OUT) :: GI(3,3)
@@ -460,10 +461,11 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
       n = elem_lists(col) % elements(t) % n
       nd = elem_lists(col) % elements(t) % nd
       nb = elem_lists(col) % elements(t) % nb
-      !!$omp target
+      !$omp target
       CALL ModuleLocalMatrixVecSO(  Element, n, nd+nb, nb, VecAsm, &
-                                    elem_lists(col)% elements(t) % nodes, coorddim, refbasis, refdBasisdx)
-      !!$omp end target
+                                    elem_lists(col)% elements(t) % nodes, coorddim, &
+                                    refbasis, refdBasisdx, refip)
+      !$omp end target
     END DO
   END DO
 
