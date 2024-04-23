@@ -445,8 +445,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     Active = GetNOFActive(Solver) ! TODO: this goes away
 
     call ResetTimer( Caller//'ColorLoop')
-    !$omp target teams
-    !$omp distribute parallel do
+    !$omp target teams distribute parallel do
     DO t=1,Active
       !totelem = totelem + 1
       !Element => elem_lists(col) % elements(t) % p
@@ -457,8 +456,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
                                     elem_lists(col)% elements(t) % nodes, coorddim, &
                                     refbasis, refdBasisdx, refip, ngp)
     END DO
-    !$omp end distribute parallel do
-    !$omp end target teams
+    !$omp end target teams distribute parallel do
     CALL CheckTimer(Caller//'ColorLoop',Delete=.TRUE.)
   END DO
 
