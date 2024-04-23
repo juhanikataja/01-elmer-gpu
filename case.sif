@@ -18,7 +18,7 @@ Simulation
   Steady State Max Iterations = 1
   Output Intervals = 1
 
-  Mesh Levels = 1
+  Mesh Levels = 0
 
   Output Level = 20
 
@@ -60,7 +60,7 @@ Solver 1
   Nonlinear System Consistent Norm = True
   Steady State Convergence Tolerance = 1.0e-05
 
-  Linear System Save = True
+  !Linear System Save = True
 
 ! Add some timing info
   Linear System Timing = True

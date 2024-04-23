@@ -29,8 +29,9 @@ SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refba
     REAL(KIND=dp), target :: LtoGMap(3,3), metric(3,3), detg
     LOGICAL :: Stat,Found
     INTEGER :: j,k,m,i,t,p,q,ngp,allocstat
+
     
-    ! INTEGER :: round = 1 ! TODO
+    INTEGER :: round = 1 ! TODO
     TYPE(GaussIntegrationPoints_t) :: IP
     type(ElementType_t) :: refElementType
     LOGICAL, SAVE :: FirstTime=.TRUE.
@@ -68,7 +69,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refba
         end do
       end do
 
-      call myElementMetric(nd,Nodes,dim,Metric,DetG,dbasisdx(i,:,:),LtoGMap)
+      call myElementMetric(nd,Nodes,dim,Metric,DetG,dlbasisdx(:,:),LtoGMap)
 
     detj(i) = detg
 
@@ -82,13 +83,12 @@ SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refba
       end do
     end do
 
-    basis(:,:) = refbasis(:,:)
+    !basis(:,:) = refbasis(:,:)
 
 
     MASS  = 0._dp
     STIFF = 0._dp
     FORCE = 0._dp
-
 
     ! PART ONE: Collect local stiffness to STIFF using experimental method
 
@@ -97,7 +97,23 @@ SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refba
     END DO
 
     CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension, dBasisdx, DetJ, STIFF, DiffCoeff )
-    CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
+    CALL LinearForms_UdotF(ngp, nd, refBasis, DetJ, SourceCoeff, FORCE)
+
+#ifdef DEBUGPRINT
+
+  if (round < 3) then
+    print *, '' 
+    DO t=1,nd 
+      write (*, '(12F9.4)') stiff(t,:)
+    end do
+  end if
+#endif
+
+#ifdef DEBUGPRINT
+  if (round < 3) then
+    round = round + 1
+  end if
+#endif
  
     
 #ifdef ASSEMBLE
@@ -117,7 +133,7 @@ END SUBROUTINE ModuleLocalMatrixVecSO
 subroutine myElementMetric(nDOFs,Nodes,dim,Metric,DetG,dLBasisdx,LtoGMap)
 
 use Types, only: dp, nodes_t
-use DefUtils
+!use DefUtils
 implicit none
 !!$omp declare target
 !------------------------------------------------------------------------------
@@ -225,6 +241,29 @@ END DO
 
 end subroutine  myElementMetric
 
+  SUBROUTINE InvertMatrix3x3( G,GI,detG )
+    use Types, only: dp
+!------------------------------------------------------------------------------
+    REAL(KIND=dp), INTENT(IN) :: G(3,3)
+    REAL(KIND=dp), INTENT(OUT) :: GI(3,3)
+    REAL(KIND=dp), intent(in) :: detG
+    REAL(KIND=dp) :: s
+!------------------------------------------------------------------------------
+    s = 1.0 / DetG
+    
+    GI(1,1) =  s * (G(2,2)*G(3,3) - G(3,2)*G(2,3));
+    GI(2,1) = -s * (G(2,1)*G(3,3) - G(3,1)*G(2,3));
+    GI(3,1) =  s * (G(2,1)*G(3,2) - G(3,1)*G(2,2));
+    
+    GI(1,2) = -s * (G(1,2)*G(3,3) - G(3,2)*G(1,3));
+    GI(2,2) =  s * (G(1,1)*G(3,3) - G(3,1)*G(1,3));
+    GI(3,2) = -s * (G(1,1)*G(3,2) - G(3,1)*G(1,2));
+
+    GI(1,3) =  s * (G(1,2)*G(2,3) - G(2,2)*G(1,3));
+    GI(2,3) = -s * (G(1,1)*G(2,3) - G(2,1)*G(1,3));
+    GI(3,3) =  s * (G(1,1)*G(2,2) - G(2,1)*G(1,2));
+!------------------------------------------------------------------------------
+  END SUBROUTINE InvertMatrix3x3
 
 
 end module
@@ -399,6 +438,8 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   nd = GetElementNOFDOFs(Element)
   print *, 'NGP:', ngp
   allocate(refbasis(ngp, nd), refdbasisdx(ngp, nd, 3))
+  refbasis = 0_dp
+  refdBasisdx = 0_dp
   do i=1,ngp
     call NodalBasisFunctions(nd, refBasis(i,:), element, refIP%u(i), refIP%v(i), refIP%w(i))
     call NodalFirstDerivatives(nd, refdBasisdx(i,:,:), element, refIP%u(i), refIP%v(i), refIP%w(i))
