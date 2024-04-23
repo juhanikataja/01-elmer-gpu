@@ -1,17 +1,24 @@
+module LocalMV
 
-SUBROUTINE LocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim)
+CONTAINS
+#ifdef BUILDLOCALMV
+
+SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refbasis, refdBasisdx)
 !------------------------------------------------------------------------------
     USE LinearForms
     USE Integration
-    use iso_c_binding
+    !use iso_c_binding
+    use DefUtils ! TODO: defaultupdateequations is here but defutils may not be used due to threadprivate module variables if
+                 ! declare target is set
     IMPLICIT NONE
-!$omp declare target
+!!$omp declare target
 
 
     INTEGER, INTENT(IN) :: n, nd, nb
     TYPE(Element_t), POINTER:: Element
     LOGICAL, INTENT(IN) :: VecAsm
     TYPE(Nodes_t), intent(in) :: Nodes
+    real(kind=dp), intent(in) :: refbasis(:,:), refdbasisdx(:,:,:)
     INTEGER :: dim
 !------------------------------------------------------------------------------
     REAL(KIND=dp), ALLOCATABLE, SAVE :: Basis(:,:),dBasisdx(:,:,:), DetJ(:)
@@ -22,6 +29,7 @@ SUBROUTINE LocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim)
     REAL(KIND=dp), target :: LtoGMap(3,3), metric(3,3), detg
     LOGICAL :: Stat,Found
     INTEGER :: j,k,m,i,t,p,q,ngp,allocstat
+    
     ! INTEGER :: round = 1 ! TODO
     TYPE(GaussIntegrationPoints_t) :: IP
     type(ElementType_t) :: refElementType
@@ -52,66 +60,16 @@ SUBROUTINE LocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim)
       FirstTime=.FALSE.
     END IF
 
-      
-    !CALL GetElementNodesVec( Nodes, UElement=Element )
-#ifdef DEBUGPRINT
-    print *, '==Element nodes================================='
-    write (*,'(12F7.3)') nodes % x(1:nd)
-    write (*,'(12F7.3)') nodes % y(1:nd)
-    write (*,'(12F7.3)') nodes % z(1:nd)
-    print *, '================================================'
-#endif
-
-
-    !INTEGER :: nDOFs                !< Number of active nodes in element
-    !TYPE(Nodes_t)    :: Nodes       !< Element nodal coordinates
-    !REAL(KIND=dp) :: Metric(:,:)    !< Contravariant metric tensor
-    !REAL(KIND=dp) :: dLBasisdx(:,:) !< Derivatives of element basis function with respect to local coordinates
-    !REAL(KIND=dp) :: DetG           !< SQRT of determinant of metric tensor
-    !REAL(KIND=dp) :: LtoGMap(3,3)   !< Transformation to obtain the referential description of the spatial gradient
-
-    ! TODO: wip loop over integration points and calculate myElementMetric
-    
-    ! Move this outside target region
-#ifdef DEBUGPRINT
-    print *, '==basis function values========================='
-#endif
-    do i=1,ngp
-      call NodalBasisFunctions(nd, Basis(i,:), element, IP%u(i), IP%v(i), IP%w(i))
-      call NodalFirstDerivatives(nd, dBasisdx(i,:,:), element, IP%u(i), IP%v(i), IP%w(i))
-#ifdef DEBUGPRINT
-      write (*,'(12F7.3)') basis(i,:)
-#endif
-    end do
-#ifdef DEBUGPRINT
-    print *, '==dbasis function values========================'
-#endif
-
-#ifdef DEBUGPRINT
-    do i = 1,ngp
-      write (*, '(I3)') i
-      write (*,'(A)', advance='no') 'dx1 '
-      write (*,'(12F8.3)') dBasisdx(i,:,1)
-      write (*,'(A)', advance='no') 'dx2 '
-      write (*,'(12F8.3)') dBasisdx(i,:,2)
-      write (*,'(A)', advance='no') 'dx3 '
-      write (*,'(12F8.3)') dBasisdx(i,:,3)
-    end do
-    print *, '================================================'
-#endif
 
     do i=1,ngp
       do j = 1,dim
         do m = 1,nd
-          dLBasisdx(m,j) = dBasisdx(i,m,j)
+          dLBasisdx(m,j) = refdBasisdx(i,m,j)
         end do
       end do
 
       call myElementMetric(nd,Nodes,dim,Metric,DetG,dbasisdx(i,:,:),LtoGMap)
 
-#ifdef DEBUGPRINT
-    write (*,'(e10.3)') sqrt(detG)
-#endif
     detj(i) = detg
 
       dbasisdx(i,:,:) = 0_dp
@@ -122,27 +80,14 @@ SUBROUTINE LocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim)
           end do 
         end do
       end do
-#ifdef DEBUGPRINT
-      write (*, '(I3)') i
-      write (*,'(A)', advance='no') 'dx1 '
-      write (*,'(12F8.3)') dBasisdx(i,:,1)
-      write (*,'(A)', advance='no') 'dx2 '
-      write (*,'(12F8.3)') dBasisdx(i,:,2)
-      write (*,'(A)', advance='no') 'dx3 '
-      write (*,'(12F8.3)') dBasisdx(i,:,3)
-#endif
     end do
+
+    basis(:,:) = refbasis(:,:)
 
 
     MASS  = 0._dp
     STIFF = 0._dp
     FORCE = 0._dp
-
-
-
-#ifdef DEBUGPRINT
-    print *, element%bodyid
-#endif
 
 
     ! PART ONE: Collect local stiffness to STIFF using experimental method
@@ -151,78 +96,30 @@ SUBROUTINE LocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim)
       DetJ(t) = IP % s(t) * Detj(t)
     END DO
 
-    CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, STIFF, DiffCoeff )
-    IF( Found ) THEN
-      CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
-    END IF
-
-#ifdef KEEP_OLD
-    ! PART TWO: Collect local stiffness to STIFF using established method
-
-    dbasisdx = 0._dp
-    stat = ElementInfoVec( Element, Nodes, ngp, IP % U, IP % V, IP % W, detJ, SIZE(Basis,2), Basis, dBasisdx )
-
-#ifdef DEBUGPRINT
-    print *, '==dbasis function values the old way============'
-    do i = 1,ngp
-      write (*, '(I3)') i
-      write (*,'(A)', advance='no') 'dx1 '
-      write (*,'(12F8.3)') dBasisdx(i,:,1)
-      write (*,'(A)', advance='no') 'dx2 '
-      write (*,'(12F8.3)') dBasisdx(i,:,2)
-      write (*,'(A)', advance='no') 'dx3 '
-      write (*,'(12F8.3)') dBasisdx(i,:,3)
-    end do
-    print *, '================================================'
-#endif
-
-    ! Compute actual integration weights (recycle the memory space of DetJ)
-    DO t=1,ngp
-      DetJ(t) = IP % s(t) * Detj(t)
-    END DO
-
-    !!$omp target data map(to: ngp, nd, dBasisdx, detj, DiffCoeff) map(tofrom:stiff)
-    !!$omp target
-    CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, MASS, DiffCoeff )
-
-    ! PART THREE: Compare
-#ifdef DEBUGPRINT_COMPARE
-
-    if (round .eq. 1) print *, '==STIFFNESS matrix (experimental-established)==='
-      write (*, '(12E10.3)') sum(abs(STIFF(:,:)-MASS(:,:)))
-      print *, ''
-    if (round .eq. 10) print *, '================================================'
-#endif
-#endif
-    
-    !CALL LinearForms_GradUdotGradU(ngp, nd, 3, dBasisdx, DetJ, STIFF, DiffCoeff )
-    !CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
-    !!$omp end target
-    !!$omp end target data
+    CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension, dBasisdx, DetJ, STIFF, DiffCoeff )
+    CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
  
     
-    ! DEBUG
-    ! IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE,UElement=Element)
-
-    !CALL CondensateP( nd-nb, nb, STIFF, FORCE )
 #ifdef ASSEMBLE
+    ! DEBUG
+    !IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE,UElement=Element)
+    !CALL CondensateP( nd-nb, nb, STIFF, FORCE )
     CALL DefaultUpdateEquations(STIFF,FORCE,UElement=Element, VecAssembly=VecAsm)
 #endif
 
-    !if (round .eq. 10) then
-      !stop
-    !end if
-      !round = round + 1
 !------------------------------------------------------------------------------
-END SUBROUTINE LocalMatrixVecSO
+END SUBROUTINE ModuleLocalMatrixVecSO
 
 !call myElementMetric(nd,Nodes,dim,Metric,DetG,dBasisdx(i,:,:),LtoGMap)
+
+#endif 
+
 subroutine myElementMetric(nDOFs,Nodes,dim,Metric,DetG,dLBasisdx,LtoGMap)
 
 use Types, only: dp, nodes_t
-!use DefUtils
+use DefUtils
 implicit none
-!$omp declare target
+!!$omp declare target
 !------------------------------------------------------------------------------
 INTEGER :: nDOFs, dim           !< Number of active nodes in element, dimension of space
 TYPE(Nodes_t)    :: Nodes       !< Element nodal coordinates
@@ -329,6 +226,9 @@ END DO
 end subroutine  myElementMetric
 
 
+
+end module
+
 SUBROUTINE AdvDiffSolver_init( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
   USE DefUtils
@@ -350,9 +250,10 @@ END SUBROUTINE AdvDiffSolver_Init
 !------------------------------------------------------------------------------
 SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
-  USE DefUtils
   USE Integration
+  USE DefUtils
   USE Types
+  use LocalMV
 
   IMPLICIT NONE
 !------------------------------------------------------------------------------
@@ -393,18 +294,18 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
 
 
-  interface 
-    SUBROUTINE LocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim)
-!------------------------------------------------------------------------------
-    use types
-
-    INTEGER, INTENT(IN) :: n, nd, nb
-    TYPE(Element_t), POINTER:: Element
-    LOGICAL, INTENT(IN) :: VecAsm
-    TYPE(Nodes_t), intent(in) :: Nodes
-    INTEGER :: dim
-    end subroutine LocalMatrixVecSO
-  end interface
+  !interface 
+    !SUBROUTINE LocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim)
+!!------------------------------------------------------------------------------
+    !use types
+!
+    !INTEGER, INTENT(IN) :: n, nd, nb
+    !TYPE(Element_t), POINTER:: Element
+    !LOGICAL, INTENT(IN) :: VecAsm
+    !TYPE(Nodes_t), intent(in) :: Nodes
+    !INTEGER :: dim
+    !end subroutine LocalMatrixVecSO
+  !end interface
 !------------------------------------------------------------------------------
 
   CALL Info(Caller,'------------------------------------------------')
@@ -437,11 +338,15 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 #endif
 
   coorddim = CoordinateSystemDimension()
-  !!$omp target
+  !$omp target
+#ifdef _OPENMP
   initial_device = omp_is_initial_device()
-  !!$omp end target
-
+#endif
+  !$omp end target
+#ifdef _OPENMP
   print *, 'initial_device:', initial_device
+#endif
+
 
   nColours = GetNOFColours(Solver)
 
@@ -515,7 +420,8 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
       nd = elem_lists(col) % elements(t) % nd
       nb = elem_lists(col) % elements(t) % nb
       !!$omp target
-      CALL LocalMatrixVecSO(  Element, n, nd+nb, nb, VecAsm, elem_lists(col)% elements(t) % nodes, coorddim)
+      CALL ModuleLocalMatrixVecSO(  Element, n, nd+nb, nb, VecAsm, &
+                                    elem_lists(col)% elements(t) % nodes, coorddim, refbasis, refdBasisdx)
       !!$omp end target
     END DO
   END DO
@@ -580,229 +486,6 @@ CONTAINS
 
 ! Assembly of the matrix entries arising from the bulk elements. Offload compatible version
 !------------------------------------------------------------------------------
-  SUBROUTINE LocalMatrixVec( Element, n, nd, nb, VecAsm, Nodes)
-!------------------------------------------------------------------------------
-    USE LinearForms
-    USE Integration
-    use iso_c_binding
-    IMPLICIT NONE
-!!$omp declare target
-
-
-    INTEGER, INTENT(IN) :: n, nd, nb
-    TYPE(Element_t), POINTER:: Element
-    LOGICAL, INTENT(IN) :: VecAsm
-    TYPE(Nodes_t), intent(in) :: Nodes
-!------------------------------------------------------------------------------
-    REAL(KIND=dp), ALLOCATABLE, SAVE :: Basis(:,:),dBasisdx(:,:,:), DetJ(:)
-    REAL(KIND=dp), ALLOCATABLE, SAVE :: MASS(:,:), STIFF(:,:), FORCE(:)
-    REAL(KIND=dp), SAVE, ALLOCATABLE  :: DiffCoeff(:), ConvCoeff(:), ReactCoeff(:), &
-         TimeCoeff(:), SourceCoeff(:), Velo1Coeff(:), Velo2Coeff(:), Velo3Coeff(:)
-    REAL(KIND=dp), SAVE, ALLOCATABLE  :: VeloCoeff(:,:)
-    REAL(KIND=dp), target :: LtoGMap(3,3), metric(3,3), detg
-    LOGICAL :: Stat,Found
-    INTEGER :: j,k,m,i,t,p,q,dim,ngp,allocstat
-    ! INTEGER :: round = 1 ! TODO
-    TYPE(GaussIntegrationPoints_t) :: IP
-    type(ElementType_t) :: refElementType
-    LOGICAL, SAVE :: FirstTime=.TRUE.
-    real(KIND=dp) :: dLBasisdx(nd, 3)
-!------------------------------------------------------------------------------
-
-    
-    dim = CoordinateSystemDimension()
-    IP = GaussPoints( Element )
-    ngp = IP % n
-
-    ! THIS IS UGLY AND DIRTY - assuming all elements are same!
-    IF (FirstTime) THEN
-      ALLOCATE(DiffCoeff(ngp), ConvCoeff(ngp), ReactCoeff(ngp), &
-           TimeCoeff(ngp), SourceCoeff(ngp), Velo1Coeff(ngp), Velo2Coeff(ngp),&
-           Velo3Coeff(ngp), VeloCoeff(ngp,3), MASS(nd,nd), STIFF(nd,nd), FORCE(nd),&
-           Basis(ngp,nd), dBasisdx(ngp,nd,3), DetJ(ngp), &
-           STAT=allocstat)
-      DiffCoeff = 1.0_dp
-      ConvCoeff=0.0_dp
-      ReactCoeff=0.0_dp
-      TimeCoeff=0.0_dp
-      SourceCoeff=1.0_dp
-      Velo1Coeff=0.0_dp
-      Velo2Coeff=0.0_dp
-      Velo3Coeff=0.0_dp
-      FirstTime=.FALSE.
-    END IF
-
-      
-    !CALL GetElementNodesVec( Nodes, UElement=Element )
-#ifdef DEBUGPRINT
-    print *, '==Element nodes================================='
-    write (*,'(12F7.3)') nodes % x(1:nd)
-    write (*,'(12F7.3)') nodes % y(1:nd)
-    write (*,'(12F7.3)') nodes % z(1:nd)
-    print *, '================================================'
-#endif
-
-
-    !INTEGER :: nDOFs                !< Number of active nodes in element
-    !TYPE(Nodes_t)    :: Nodes       !< Element nodal coordinates
-    !REAL(KIND=dp) :: Metric(:,:)    !< Contravariant metric tensor
-    !REAL(KIND=dp) :: dLBasisdx(:,:) !< Derivatives of element basis function with respect to local coordinates
-    !REAL(KIND=dp) :: DetG           !< SQRT of determinant of metric tensor
-    !REAL(KIND=dp) :: LtoGMap(3,3)   !< Transformation to obtain the referential description of the spatial gradient
-
-    ! TODO: wip loop over integration points and calculate myElementMetric
-    
-    ! Move this outside target region
-#ifdef DEBUGPRINT
-    print *, '==basis function values========================='
-#endif
-    do i=1,ngp
-      call NodalBasisFunctions(nd, Basis(i,:), element, IP%u(i), IP%v(i), IP%w(i))
-      call NodalFirstDerivatives(nd, dBasisdx(i,:,:), element, IP%u(i), IP%v(i), IP%w(i))
-#ifdef DEBUGPRINT
-      write (*,'(12F7.3)') basis(i,:)
-#endif
-    end do
-#ifdef DEBUGPRINT
-    print *, '==dbasis function values========================'
-#endif
-
-#ifdef DEBUGPRINT
-    do i = 1,ngp
-      write (*, '(I3)') i
-      write (*,'(A)', advance='no') 'dx1 '
-      write (*,'(12F8.3)') dBasisdx(i,:,1)
-      write (*,'(A)', advance='no') 'dx2 '
-      write (*,'(12F8.3)') dBasisdx(i,:,2)
-      write (*,'(A)', advance='no') 'dx3 '
-      write (*,'(12F8.3)') dBasisdx(i,:,3)
-    end do
-    print *, '================================================'
-#endif
-
-    do i=1,ngp
-      do j = 1,dim
-        do m = 1,nd
-          dLBasisdx(m,j) = dBasisdx(i,m,j)
-        end do
-      end do
-      call myElementMetric(nd,Nodes,dim,Metric,DetG,dbasisdx(i,:,:),LtoGMap)
-#ifdef DEBUGPRINT
-    write (*,'(e10.3)') sqrt(detG)
-#endif
-    detj(i) = detg
-
-      dbasisdx(i,:,:) = 0_dp
-      do m = 1,nd
-        do j=1,dim
-          do k=1,dim
-            dbasisdx(i,m,j) = dbasisdx(i,m,j) + dLbasisdx(m,k)*LtoGMap(j,k)
-          end do 
-        end do
-      end do
-#ifdef DEBUGPRINT
-      write (*, '(I3)') i
-      write (*,'(A)', advance='no') 'dx1 '
-      write (*,'(12F8.3)') dBasisdx(i,:,1)
-      write (*,'(A)', advance='no') 'dx2 '
-      write (*,'(12F8.3)') dBasisdx(i,:,2)
-      write (*,'(A)', advance='no') 'dx3 '
-      write (*,'(12F8.3)') dBasisdx(i,:,3)
-#endif
-    end do
-
-
-    ! stop
-
-    !SUBROUTINE GetRefPElementNodes(Element, U, V, W)
-    !TYPE(ElementType_t) :: Element
-    !REAL(KIND=dp) :: U(:), V(:), W(:)
-
-    ! Initialize
-    MASS  = 0._dp
-    STIFF = 0._dp
-    FORCE = 0._dp
-
-    ! Numerical integration:
-    ! Compute basis function values and derivatives at integration points
-    !--------------------------------------------------------------
-
-
-#ifdef DEBUGPRINT
-    print *, element%bodyid
-#endif
-
-
-    ! PART ONE: Collect local stiffness to STIFF using experimental method
-
-    DO t=1,ngp
-      DetJ(t) = IP % s(t) * Detj(t)
-    END DO
-
-    CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, STIFF, DiffCoeff )
-    IF( Found ) THEN
-      CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
-    END IF
-
-#ifdef KEEP_OLD
-    ! PART TWO: Collect local stiffness to STIFF using established method
-
-    dbasisdx = 0._dp
-    stat = ElementInfoVec( Element, Nodes, ngp, IP % U, IP % V, IP % W, detJ, SIZE(Basis,2), Basis, dBasisdx )
-
-#ifdef DEBUGPRINT
-    print *, '==dbasis function values the old way============'
-    do i = 1,ngp
-      write (*, '(I3)') i
-      write (*,'(A)', advance='no') 'dx1 '
-      write (*,'(12F8.3)') dBasisdx(i,:,1)
-      write (*,'(A)', advance='no') 'dx2 '
-      write (*,'(12F8.3)') dBasisdx(i,:,2)
-      write (*,'(A)', advance='no') 'dx3 '
-      write (*,'(12F8.3)') dBasisdx(i,:,3)
-    end do
-    print *, '================================================'
-#endif
-
-    ! Compute actual integration weights (recycle the memory space of DetJ)
-    DO t=1,ngp
-      DetJ(t) = IP % s(t) * Detj(t)
-    END DO
-
-    !!$omp target data map(to: ngp, nd, dBasisdx, detj, DiffCoeff) map(tofrom:stiff)
-    !!$omp target
-    CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, MASS, DiffCoeff )
-
-    ! PART THREE: Compare
-#ifdef DEBUGPRINT_COMPARE
-
-    if (round .eq. 1) print *, '==STIFFNESS matrix (experimental-established)==='
-      write (*, '(12E10.3)') sum(abs(STIFF(:,:)-MASS(:,:)))
-      print *, ''
-    if (round .eq. 10) print *, '================================================'
-#endif
-#endif
-    
-    !CALL LinearForms_GradUdotGradU(ngp, nd, 3, dBasisdx, DetJ, STIFF, DiffCoeff )
-    !CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
-    !!$omp end target
-    !!$omp end target data
- 
-    
-    ! DEBUG
-    ! IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE,UElement=Element)
-
-    !CALL CondensateP( nd-nb, nb, STIFF, FORCE )
-#ifdef ASSEMBLE
-    CALL DefaultUpdateEquations(STIFF,FORCE,UElement=Element, VecAssembly=VecAsm)
-#endif
-
-    !if (round .eq. 10) then
-      !stop
-    !end if
-      !round = round + 1
-!------------------------------------------------------------------------------
-  END SUBROUTINE LocalMatrixVec
 !------------------------------------------------------------------------------
 
 
@@ -893,3 +576,4 @@ CONTAINS
 !------------------------------------------------------------------------------
 END SUBROUTINE AdvDiffSolver
 !------------------------------------------------------------------------------
+
