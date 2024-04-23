@@ -3,13 +3,15 @@ module LocalMV
 CONTAINS
 #ifdef BUILDLOCALMV
 
-SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refbasis, refdBasisdx, ip)
+SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refbasis, refdBasisdx, ip, ngp)
 !------------------------------------------------------------------------------
     USE LinearForms
     USE Integration
     !use iso_c_binding
-    !use DefUtils ! TODO: defaultupdateequations is here but defutils may not be used due to threadprivate module variables if
+#ifdef ASSEMBLE
+    use DefUtils ! TODO: defaultupdateequations is here but defutils may not be used due to threadprivate module variables if
                  ! declare target is set
+#endif
     IMPLICIT NONE
 !$omp declare target
 
@@ -22,11 +24,10 @@ SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refba
     real(kind=dp), intent(in) :: refbasis(:,:), refdbasisdx(:,:,:)
     TYPE(GaussIntegrationPoints_t), intent(in) :: IP
 !------------------------------------------------------------------------------
-    REAL(KIND=dp), ALLOCATABLE, SAVE :: Basis(:,:),dBasisdx(:,:,:), DetJ(:)
-    REAL(KIND=dp), ALLOCATABLE, SAVE :: MASS(:,:), STIFF(:,:), FORCE(:)
-    REAL(KIND=dp), SAVE, ALLOCATABLE  :: DiffCoeff(:), ConvCoeff(:), ReactCoeff(:), &
-         TimeCoeff(:), SourceCoeff(:), Velo1Coeff(:), Velo2Coeff(:), Velo3Coeff(:)
-    REAL(KIND=dp), SAVE, ALLOCATABLE  :: VeloCoeff(:,:)
+    REAL(KIND=dp) :: Basis(ngp,nd)
+    real(kind=dp) :: dBasisdx(ngp,nd,3), DetJ(ngp)
+    REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd)
+    REAL(KIND=dp) :: DiffCoeff(ngp), SourceCoeff(ngp)
     REAL(KIND=dp), target :: LtoGMap(3,3), metric(3,3), detg
     LOGICAL :: Stat,Found
     INTEGER :: j,k,m,i,t,p,q,ngp,allocstat
@@ -34,7 +35,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refba
     
     INTEGER :: round = 1 ! TODO
     !type(ElementType_t) :: refElementType
-    LOGICAL, SAVE :: FirstTime=.TRUE.
+    !LOGICAL, SAVE :: FirstTime=.TRUE.
     real(KIND=dp) :: dLBasisdx(nd, 3)
 !------------------------------------------------------------------------------
 
@@ -44,22 +45,6 @@ SUBROUTINE ModuleLocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim, refba
     !ngp = IP % n
 
     ! THIS IS UGLY AND DIRTY - assuming all elements are same!
-    IF (FirstTime) THEN
-      ALLOCATE(DiffCoeff(ngp), ConvCoeff(ngp), ReactCoeff(ngp), &
-           TimeCoeff(ngp), SourceCoeff(ngp), Velo1Coeff(ngp), Velo2Coeff(ngp),&
-           Velo3Coeff(ngp), VeloCoeff(ngp,3), MASS(nd,nd), STIFF(nd,nd), FORCE(nd),&
-           Basis(ngp,nd), dBasisdx(ngp,nd,3), DetJ(ngp), &
-           STAT=allocstat)
-      DiffCoeff = 1.0_dp
-      ConvCoeff=0.0_dp
-      ReactCoeff=0.0_dp
-      TimeCoeff=0.0_dp
-      SourceCoeff=1.0_dp
-      Velo1Coeff=0.0_dp
-      Velo2Coeff=0.0_dp
-      Velo3Coeff=0.0_dp
-      FirstTime=.FALSE.
-    END IF
 
 
     do i=1,ngp
@@ -464,7 +449,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
       !$omp target
       CALL ModuleLocalMatrixVecSO(  Element, n, nd+nb, nb, VecAsm, &
                                     elem_lists(col)% elements(t) % nodes, coorddim, &
-                                    refbasis, refdBasisdx, refip)
+                                    refbasis, refdBasisdx, refip, ngp)
       !$omp end target
     END DO
   END DO
