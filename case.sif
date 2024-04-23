@@ -11,16 +11,16 @@ End
 
 
 Simulation
-  Max Output Level = 3
+  Max Output Level = 11
 
   Coordinate System = "Cartesian"
   Simulation Type = "Steady State"
   Steady State Max Iterations = 1
   Output Intervals = 1
 
-  Mesh Levels = 3
+  Mesh Levels = 2
 
-  Output Level = 10
+  Output Level = 15
 
   Simulation Timing = Logical True
   Post File = "case_fixedparams.vtu"

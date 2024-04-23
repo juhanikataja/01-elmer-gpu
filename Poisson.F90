@@ -199,7 +199,6 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   VecAsm = (nColours > 1) .OR. (nthr == 1)
 
-  CALL ResetTimer( Caller//'BulkAssembly' )
 
   !$omp target
   initial_device = omp_is_initial_device()
@@ -246,7 +245,6 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   end do
   !$OMP END PARALLEL
 
-  CALL CheckTimer(Caller//'BulkAssembly', Delete=.TRUE.)
 
   nColours = GetNOFColours(Solver)
 
@@ -267,9 +265,10 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   print *, '==dbasis function values========================'
 
+  CALL ResetTimer( Caller//'BulkAssembly' )
   DO col=1,nColours
 
-    CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=1) ! TODO: this goes away
+    ! CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=1) ! TODO: this goes away
     Active = GetNOFActive(Solver) ! TODO: this goes away
 
     DO t=1,Active
@@ -284,6 +283,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     END DO
   END DO
 
+    CALL CheckTimer(Caller//'BulkAssembly',Delete=.TRUE.)
   !return
   totelem = 0
 
@@ -365,6 +365,7 @@ CONTAINS
     REAL(KIND=dp), target :: LtoGMap(3,3), metric(3,3), detg
     LOGICAL :: Stat,Found
     INTEGER :: j,k,m,i,t,p,q,dim,ngp,allocstat
+    INTEGER :: round = 1 ! TODO
     TYPE(GaussIntegrationPoints_t) :: IP
     type(Nodes_t), SAVE :: refNodes
     type(ElementType_t) :: refElementType
@@ -457,6 +458,7 @@ CONTAINS
 #ifdef DEBUGPRINT
     write (*,'(e10.3)') sqrt(detG)
 #endif
+    detj(i) = detg
 
       dbasisdx(i,:,:) = 0_dp
       do m = 1,nd
@@ -498,9 +500,25 @@ CONTAINS
     print *, element%bodyid
 #endif
 
+
+    ! PART ONE: Collect local stiffness to STIFF using experimental method
+
+    DO t=1,ngp
+      DetJ(t) = IP % s(t) * Detj(t)
+    END DO
+
+    CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, STIFF, DiffCoeff )
+    IF( Found ) THEN
+      CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
+    END IF
+
+#ifdef KEEP_OLD
+    ! PART TWO: Collect local stiffness to STIFF using established method
+
     dbasisdx = 0._dp
-#ifdef DEBUGPRINT
     stat = ElementInfoVec( Element, Nodes, ngp, IP % U, IP % V, IP % W, detJ, SIZE(Basis,2), Basis, dBasisdx )
+
+#ifdef DEBUGPRINT
     print *, '==dbasis function values the old way============'
     do i = 1,ngp
       write (*, '(I3)') i
@@ -513,7 +531,6 @@ CONTAINS
     end do
     print *, '================================================'
 #endif
-    stop
 
     ! Compute actual integration weights (recycle the memory space of DetJ)
     DO t=1,ngp
@@ -522,7 +539,18 @@ CONTAINS
 
     !!$omp target data map(to: ngp, nd, dBasisdx, detj, DiffCoeff) map(tofrom:stiff)
     !!$omp target
-    ! CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, STIFF, DiffCoeff )
+    CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % Dimension , dBasisdx, DetJ, MASS, DiffCoeff )
+
+    ! PART THREE: Compare
+#ifdef DEBUGPRINT_COMPARE
+
+    if (round .eq. 1) print *, '==STIFFNESS matrix (experimental-established)==='
+      write (*, '(12E10.3)') sum(abs(STIFF(:,:)-MASS(:,:)))
+      print *, ''
+    if (round .eq. 10) print *, '================================================'
+#endif
+#endif
+    
     !CALL LinearForms_GradUdotGradU(ngp, nd, 3, dBasisdx, DetJ, STIFF, DiffCoeff )
     !CALL LinearForms_UdotF(ngp, nd, Basis, DetJ, SourceCoeff, FORCE)
     !!$omp end target
@@ -530,9 +558,17 @@ CONTAINS
  
     
     ! DEBUG
-    !IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE,UElement=Element)
+    ! IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE,UElement=Element)
+
     !CALL CondensateP( nd-nb, nb, STIFF, FORCE )
-    !CALL DefaultUpdateEquations(STIFF,FORCE,UElement=Element, VecAssembly=VecAsm)
+#ifdef ASSEMBLE
+    CALL DefaultUpdateEquations(STIFF,FORCE,UElement=Element, VecAssembly=VecAsm)
+#endif
+
+    !if (round .eq. 10) then
+      !stop
+    !end if
+      !round = round + 1
 !------------------------------------------------------------------------------
   END SUBROUTINE LocalMatrixVec
 !------------------------------------------------------------------------------
