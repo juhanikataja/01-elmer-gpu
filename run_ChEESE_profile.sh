@@ -8,7 +8,7 @@
 ##
 ################################
  
-#SBATCH --time=00:10:00
+#SBATCH --time=00:15:00
 #SBATCH --job-name=ChEESE_test
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
@@ -66,4 +66,4 @@ ml myelmer/offload
 #module load elmer/gcc-cray
 ###### make it so! ######### 
 #
-srun ElmerSolver case.sif
+srun rocprof --stats --hip-trace --hsa-trace -i trace_profile.txt ElmerSolver case.sif

@@ -18,7 +18,7 @@ Simulation
   Steady State Max Iterations = 1
   Output Intervals = 1
 
-  Mesh Levels = 2
+  Mesh Levels = 1
 
   Output Level = 20
 

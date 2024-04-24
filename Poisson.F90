@@ -1,11 +1,11 @@
 module LocalMV
 
 CONTAINS
-#ifdef BUILDLOCALMV
+!#ifdef BUILDLOCALMV
 
 SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, VecAsm, Nodes, dim, refbasis, refdBasisdx, ip, ngp)
 !------------------------------------------------------------------------------
-    USE LinearForms
+    !USE LinearForms
     USE Integration
     !use iso_c_binding
 #ifdef ASSEMBLE
@@ -117,7 +117,7 @@ END SUBROUTINE ModuleLocalMatrixVecSO
 
 !call myElementMetric(nd,Nodes,dim,Metric,DetG,dBasisdx(i,:,:),LtoGMap)
 
-#endif 
+!#endif  ! BUILDLOCALMV
 
 subroutine myElementMetric(nDOFs,Nodes,dim,Metric,DetG,dLBasisdx,LtoGMap)
 
@@ -255,6 +255,59 @@ end subroutine  myElementMetric
 !------------------------------------------------------------------------------
   END SUBROUTINE InvertMatrix3x3
 
+  SUBROUTINE LinearForms_GradUdotGradU(m, n, dim, GradU, weight, G, alpha)
+    USE Types, ONLY: dp, VECTOR_BLOCK_LENGTH, VECTOR_SMALL_THRESH
+    IMPLICIT NONE
+    !$omp declare target 
+    INTEGER, INTENT(IN) :: m, n, dim
+    REAL(KIND=dp) CONTIG, INTENT(IN) :: GradU(:,:,:), weight(:)
+    REAL(KIND=dp) CONTIG, INTENT(INOUT) :: G(:,:)
+    REAL(KIND=dp) CONTIG, INTENT(IN)  :: alpha(:)
+
+    INTEGER :: i, ii, iin, j, l, k, kk, ldbasis, ldk, blklen
+
+    ldbasis = SIZE(GradU,1)
+    ldk = SIZE(G,1)
+
+    DO ii=1,m,VECTOR_BLOCK_LENGTH
+      iin=MIN(ii+VECTOR_BLOCK_LENGTH-1,m)
+      blklen=iin-ii+1
+
+      DO j=1,n
+        DO i=1,n
+          DO k=1,dim
+            DO l=ii,iin
+              G(i,j) = G(i,j) + GradU(l,i,k)*GradU(l,j,k)*weight(l)*alpha(l)
+            END DO
+          END DO
+        END DO
+      END DO
+        
+    END DO ! Vector blocks
+  END SUBROUTINE LinearForms_GradUdotGradU
+
+  SUBROUTINE LinearForms_UdotF(m, n, U, weight, F, UdotF)
+  USE Types, ONLY: dp, VECTOR_BLOCK_LENGTH, VECTOR_SMALL_THRESH
+    IMPLICIT NONE
+    !$omp declare target 
+
+    INTEGER, INTENT(IN) :: m, n
+    REAL(KIND=dp) CONTIG, INTENT(IN) :: U(:,:), F(:), weight(:)
+    REAL(KIND=dp) CONTIG, INTENT(INOUT) :: UdotF(:)
+
+    INTEGER :: i, ii, iin, j, blklen, l
+
+    DO ii=1,m,VECTOR_BLOCK_LENGTH
+      iin = MIN(ii+VECTOR_BLOCK_LENGTH-1,m)
+      blklen= iin-ii+1
+      ! Project local F to global basis
+      DO i=1,n
+        DO l=ii,iin
+          UdotF(i) = UdotF(i) + U(l,i)*F(l)*weight(l)
+        END DO
+      END DO
+    END DO
+  END SUBROUTINE LinearForms_UdotF
 
 end module
 
@@ -437,6 +490,9 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   end do
 
   print *, '================================================'
+#ifdef PROFILING
+  nColours = min(2, nColours)
+#endif
 
   CALL ResetTimer( Caller//'BulkAssembly' )
   DO col=1,nColours
@@ -445,7 +501,10 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     Active = GetNOFActive(Solver) ! TODO: this goes away
 
     call ResetTimer( Caller//'ColorLoop')
-    !$omp target teams distribute parallel do
+#ifndef NOGPU
+    !$omp target 
+#endif
+    !$omp teams distribute parallel do
     DO t=1,Active
       !totelem = totelem + 1
       !Element => elem_lists(col) % elements(t) % p
@@ -456,7 +515,10 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
                                     elem_lists(col)% elements(t) % nodes, coorddim, &
                                     refbasis, refdBasisdx, refip, ngp)
     END DO
-    !$omp end target teams distribute parallel do
+    !$omp end teams distribute parallel do
+#ifndef NOGPU
+    !$omp end target
+#endif
     CALL CheckTimer(Caller//'ColorLoop',Delete=.TRUE.)
   END DO
 
@@ -476,6 +538,8 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   !$OMP SHARED(Active, Solver, nColours, VecAsm) &
   !$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
   !$OMP REDUCTION(+:totelem) DEFAULT(NONE)
+
+
   DO col=1,nColours
     !$OMP SINGLE
     CALL Info('ModelPDEthreaded','Assembly of boundary colour: '//I2S(col),Level=10)
