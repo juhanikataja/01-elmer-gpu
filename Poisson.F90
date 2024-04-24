@@ -441,21 +441,21 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   end do
 
   !!$omp target enter data map(to:solver%mesh%elements)
-  !!$omp target enter data map(to:elem_lists)
+  !!$omp target enter data map(to:elem_lists(1:nColours))
 
   !! Tabulate elements and their ndofs/nnodes/nb 
   nColours = GetNOFColours(Solver)
-  !$OMP PARALLEL &
-  !$OMP SHARED(Active, Solver, nColours, VecAsm, elem_lists) &
-  !$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
-  !$OMP REDUCTION(max:MaxNumNodes) DEFAULT(none)
+  !!$OMP PARALLEL &
+  !!$OMP SHARED(Active, Solver, nColours, VecAsm, elem_lists) &
+  !!$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
+  !!$OMP REDUCTION(max:MaxNumNodes) DEFAULT(none)
   do col=1,ncolours
-    !$OMP SINGLE
+    !!$OMP SINGLE
+    !!$omp target enter data map(to:elem_lists(col)) nowait
     active = GetNOFActive(Solver)
-    !!$omp target enter data map(to:elem_lists(col) % elements)
-    !$OMP END SINGLE
+    !!$OMP END SINGLE
 
-    !$OMP DO
+    !!$OMP DO
     do t=1,active
       Element => GetActiveElement(t)
       elem_lists(col) % elements(t) % p => Element
@@ -463,11 +463,18 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
       elem_lists(col) % elements(t) % nd = GetElementNOFDOFs(Element)
       elem_lists(col) % elements(t) % nb = GetElementNOFBDOFs(Element)
       CALL GetElementNodesVec( elem_lists(col) % elements(t) % nodes,  elem_lists(col) % elements(t) % p)
+      !!$omp target enter data map(to: elem_lists(col) % elements(t) % n) nowait
+      !!$omp target enter data map(to: elem_lists(col) % elements(t) % nd) nowait
+      !!$omp target enter data map(to: elem_lists(col) % elements(t) % nb) nowait
+      !!$omp target enter data map(to: elem_lists(col) % elements(t) % nodes % xyz) nowait
+      !!$omp target enter data map(to: elem_lists(col) % elements(t) % nodes % x) nowait
+      !!$omp target enter data map(to: elem_lists(col) % elements(t) % nodes % y) nowait
+      !!$omp target enter data map(to: elem_lists(col) % elements(t) % nodes % z) nowait
       MaxNumNodes = max(MaxNumNodes,elem_lists(col) % elements(t) % n)
     end do
-    !$OMP END DO
+    !!$OMP END DO
   end do
-  !$OMP END PARALLEL
+  !!$OMP END PARALLEL
 
 
   nColours = GetNOFColours(Solver)
@@ -498,11 +505,14 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   DO col=1,nColours
 
     ! CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=1) ! TODO: this goes away
-    Active = GetNOFActive(Solver) ! TODO: this goes away
+    !Active = GetNOFActive(Solver) ! TODO: this goes away
 
     call ResetTimer( Caller//'ColorLoop')
+    active = size(elem_lists(col) % elements, 1)
+    
 #ifndef NOGPU
-    !$omp target 
+    !$omp target data map(to: elem_lists(col) % elements(1:active))
+    !$omp target
 #endif
     !$omp teams distribute parallel do
     DO t=1,Active
@@ -518,6 +528,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     !$omp end teams distribute parallel do
 #ifndef NOGPU
     !$omp end target
+    !$omp end target data
 #endif
     CALL CheckTimer(Caller//'ColorLoop',Delete=.TRUE.)
   END DO

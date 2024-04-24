@@ -66,4 +66,4 @@ ml myelmer/offload
 #module load elmer/gcc-cray
 ###### make it so! ######### 
 #
-srun rocprof --stats --hip-trace --hsa-trace -i trace_profile.txt ElmerSolver case.sif
+srun rocprof --stats --sys-trace -i trace_profile.txt ElmerSolver case.sif
