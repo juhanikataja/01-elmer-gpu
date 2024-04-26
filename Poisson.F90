@@ -48,8 +48,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, VecAsm, Nodes, dim, refbasis, refd
     !IP = GaussPoints( Element )
     !ngp = IP % n
 
-    ! THIS IS UGLY AND DIRTY - assuming all elements are same!
-
+    DiffCoeff = 1._dp ! TODO: Material parameters must be communicated somehow to the solver
 
     do i=1,ngp
       do j = 1,dim
@@ -60,7 +59,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, VecAsm, Nodes, dim, refbasis, refd
 
       call myElementMetric(nd,Nodes,dim,Metric,DetG,dlbasisdx(:,:),LtoGMap)
 
-    detj(i) = detg
+      detj(i) = detg
 
       dbasisdx(i,:,:) = 0_dp
       do m = 1,nd
@@ -127,9 +126,9 @@ implicit none
 !$omp declare target
 !------------------------------------------------------------------------------
 INTEGER :: nDOFs, dim           !< Number of active nodes in element, dimension of space
-TYPE(Nodes_t)    :: Nodes       !< Element nodal coordinates
+TYPE(Nodes_t), intent(in)  :: Nodes       !< Element nodal coordinates
 REAL(KIND=dp), intent(out) :: Metric(3,3)    !< Contravariant metric tensor
-REAL(KIND=dp), intent(in) :: dLBasisdx(nDOFs,3) !< Derivatives of element basis function with respect to local coordinates
+REAL(KIND=dp), intent(in)  :: dLBasisdx(nDOFs,3) !< Derivatives of element basis function with respect to local coordinates
 REAL(KIND=dp), intent(out) :: DetG           !< SQRT of determinant of metric tensor
 REAL(KIND=dp), intent(out) :: LtoGMap(3,3)   !< Transformation to obtain the referential description of the spatial gradient
 !LOGICAL :: Success              !< Returns .FALSE. if element is degenerate
@@ -137,13 +136,14 @@ REAL(KIND=dp), intent(out) :: LtoGMap(3,3)   !< Transformation to obtain the ref
 !    Local variables
 !------------------------------------------------------------------------------
 REAL(KIND=dp) :: dx(3,3),G(3,3),GI(3,3),s
-REAL(KIND=dp), DIMENSION(:), POINTER :: x,y,z
+!REAL(KIND=dp), DIMENSION(:), POINTER :: x,y,z
 INTEGER :: GeomId     
 INTEGER :: cdim,i,j,k,n,imin,jmin
 !------------------------------------------------------------------------------
-x => Nodes % x
-y => Nodes % y
-z => Nodes % z
+associate(x=> nodes %x, y => nodes % y, z => nodes % z)
+! x => Nodes % x
+! y => Nodes % y
+! z => Nodes % z
 
 cdim = dim !CoordinateSystemDimension()
 n = MIN( SIZE(x), nDOFs )
@@ -158,6 +158,7 @@ DO i=1,dim
   dx(2,i) = SUM( y(1:n) * dLBasisdx(1:n,i) )
   dx(3,i) = SUM( z(1:n) * dLBasisdx(1:n,i) )
 END DO
+end associate
 !------------------------------------------------------------------------------
 !    Compute the covariant metric tensor of the element coordinate system
 !------------------------------------------------------------------------------
@@ -230,7 +231,7 @@ END DO
 
 end subroutine  myElementMetric
 
-  SUBROUTINE InvertMatrix3x3( G,GI,detG )
+  PURE SUBROUTINE InvertMatrix3x3( G,GI,detG )
     use Types, only: dp
     !$omp declare target
 !------------------------------------------------------------------------------
@@ -498,10 +499,17 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   print *, '================================================'
 #ifdef PROFILING
-  nColours = min(2, nColours)
+  nColours = min(20, nColours)
 #endif
 
   CALL ResetTimer( Caller//'BulkAssembly' )
+#ifndef NOGPU
+  DO col=1,nColours
+    active = size(elem_lists(col) % elements, 1)
+    !$omp target enter data map(to: elem_lists(col) % elements(1:active))
+  end do
+#endif
+
   DO col=1,nColours
 
     ! CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=1) ! TODO: this goes away
@@ -511,25 +519,32 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     active = size(elem_lists(col) % elements, 1)
     
 #ifndef NOGPU
-    !$omp target data map(to: elem_lists(col) % elements(1:active))
+    !!$omp target data map(to: elem_lists(col) % elements(1:active))
     !$omp target
 #endif
     !$omp teams distribute parallel do
     DO t=1,Active
       !totelem = totelem + 1
       !Element => elem_lists(col) % elements(t) % p
-      n = elem_lists(col) % elements(t) % n
-      nd = elem_lists(col) % elements(t) % nd
-      nb = elem_lists(col) % elements(t) % nb
+      associate( &
+        n => elem_lists(col) % elements(t) %n, &
+        nd => elem_lists(col) % elements(t) % nd, &
+        nb => elem_lists(col) % elements(t) % nb)
+
+      !n = elem_lists(col) % elements(t) % n
+      !nd = elem_lists(col) % elements(t) % nd
+      !nb = elem_lists(col) % elements(t) % nb
       CALL ModuleLocalMatrixVecSO(  n, nd+nb, nb, VecAsm, &
                                     elem_lists(col)% elements(t) % nodes, coorddim, &
                                     refbasis, refdBasisdx, refip, ngp)
+      end associate
     END DO
     !$omp end teams distribute parallel do
 #ifndef NOGPU
     !$omp end target
-    !$omp end target data
+    !!$omp end target data
 #endif
+    write (*, '(A)', advance='no') col
     CALL CheckTimer(Caller//'ColorLoop',Delete=.TRUE.)
   END DO
 

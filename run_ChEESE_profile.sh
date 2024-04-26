@@ -41,6 +41,9 @@ export CRAY_ACC_USE_UNIFIED_MEM=1
 export HSA_XNACK=1
 export CRAY_ACC_DEBUG=0
 
+# This is some profiling thingy
+export LD_PRELOAD=./libpreload-me.so
+
 ###### enable CSC provided modules #########
 ml use /appl/local/csc/modulefiles
 module use ~/.modulefiles
@@ -65,5 +68,8 @@ ml myelmer/offload
 ###### (using cray-libsci (BLAS, LAPACK)
 #module load elmer/gcc-cray
 ###### make it so! ######### 
-#
-srun rocprof --stats --sys-trace -i trace_profile.txt ElmerSolver case.sif
+##
+
+srun rocprof --stats --sys-trace ElmerSolver case.sif
+#ElmerSolver case.sif
+#srun rocprof --stats --hip-trace -i trace_profile.txt ElmerSolver case.sif
