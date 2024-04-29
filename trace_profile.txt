@@ -1,1 +1,3 @@
-pmc : Wavefronts, VALUInsts, SALUInsts, SFetchInsts, FlatVMemInsts, LDSInsts, FlatLDSInsts, GDSInsts, VALUUtilization, FetchSize, GPUBusy
+pmc: L2CacheHit, VALUBusy, SALUBusy, VALUUtilization
+pmc: FetchSize, WriteSize, MemUnitBusy, MemUnitStalled
+pmc: ALUStalledByLDS, GPUBusy

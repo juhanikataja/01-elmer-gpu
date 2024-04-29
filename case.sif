@@ -4,7 +4,7 @@
 
 Header
   CHECK KEYWORDS Warn
-  Mesh DB "." "winkel_015"
+  Mesh DB "." "winkel_035"
   Include Path ""
   Results Directory "results"
 End

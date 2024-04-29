@@ -70,6 +70,8 @@ ml myelmer/offload
 ###### make it so! ######### 
 ##
 
-srun rocprof --stats --sys-trace ElmerSolver case.sif
+#srun rocprof --stats --sys-trace -i trace_profile.txt ElmerSolver case.sif
+srun rocminfo
+srun rocprof --stats -i trace_profile.txt ElmerSolver case.sif
 #ElmerSolver case.sif
 #srun rocprof --stats --hip-trace -i trace_profile.txt ElmerSolver case.sif

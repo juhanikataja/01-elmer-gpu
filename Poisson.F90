@@ -369,6 +369,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   type :: elem_list_t
     type(elem_ptr), allocatable :: elements(:)
+    real(kind=dp), allocatable, target :: x(:,:), y(:,:), z(:,:)
   end type
 
   TYPE(elem_list_t), allocatable :: elem_lists(:)
