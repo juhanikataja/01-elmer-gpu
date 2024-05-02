@@ -532,7 +532,11 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     active = size(elem_lists(col) % elements, 1)
 
     !CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=1) ! TODO: this goes away
-    !call ResetTimer( Caller//'ColorLoop')
+
+#ifdef NOGPU
+    call ResetTimer( Caller//'ColorLoop')
+#endif
+
 #ifndef NOGPU
     color_timing(col) = omp_get_wtime() 
 #endif
@@ -552,8 +556,11 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     !$omp end target teams distribute parallel do
     !$omp wait
 
-    !write (*, '(A, I4, I9, A)', advance='no') 'Color, #elems (', col, active,') '
-    !CALL CheckTimer(Caller//'ColorLoop',Delete=.TRUE.)
+#ifdef NOGPU
+    write (*, '(A, I4, I9, A)', advance='no') 'Color, #elems (', col, active,') '
+    CALL CheckTimer(Caller//'ColorLoop',Delete=.TRUE.)
+#endif
+
 #ifndef NOGPU
     color_timing(col) = omp_get_wtime() - color_timing(col)
 #endif
