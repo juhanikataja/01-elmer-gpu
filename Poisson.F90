@@ -3,7 +3,7 @@ module LocalMV
 CONTAINS
 !#ifdef BUILDLOCALMV
 
-SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, VecAsm, Nodes, dim, refbasis, refdBasisdx, ip, ngp)
+SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, VecAsm, x, y, z, dim, refbasis, refdBasisdx, ip, ngp)
 !------------------------------------------------------------------------------
     !USE LinearForms
     USE Integration
@@ -19,7 +19,8 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, VecAsm, Nodes, dim, refbasis, refd
     INTEGER, INTENT(IN) :: n, nd, nb
     !TYPE(Element_t), POINTER:: Element
     LOGICAL, INTENT(IN) :: VecAsm
-    TYPE(Nodes_t), intent(in) :: Nodes
+    !TYPE(Nodes_t), intent(in) :: Nodes
+    real(kind=dp), intent(in) :: x(:), y(:), z(:)
     INTEGER :: dim
     real(kind=dp), intent(in) :: refbasis(:,:), refdbasisdx(:,:,:)
     TYPE(GaussIntegrationPoints_t), intent(in) :: IP
@@ -58,7 +59,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, VecAsm, Nodes, dim, refbasis, refd
         end do
       end do
 
-      call myElementMetric(nd,Nodes,dim,Metric,DetG,dlbasisdx(:,:),LtoGMap)
+      call myElementMetric(nd,n,x,y,z,dim,Metric,DetG,dlbasisdx(:,:),LtoGMap)
 
       detj(i) = detg
 
@@ -121,15 +122,16 @@ END SUBROUTINE ModuleLocalMatrixVecSO
 
 !#endif  ! BUILDLOCALMV
 
-subroutine myElementMetric(nDOFs,Nodes,dim,Metric,DetG,dLBasisdx,LtoGMap)
+subroutine myElementMetric(nDOFs,nnodes,x,y,z,dim,Metric,DetG,dLBasisdx,LtoGMap)
 
 use Types, only: dp, nodes_t
 !use DefUtils
 implicit none
 !$omp declare target
 !------------------------------------------------------------------------------
-INTEGER :: nDOFs, dim           !< Number of active nodes in element, dimension of space
-TYPE(Nodes_t), intent(in)  :: Nodes       !< Element nodal coordinates
+INTEGER :: nDOFs, dim, nnodes   !< Number of active nodes in element, dimension of space, 
+! TYPE(Nodes_t), intent(in)  :: Nodes       !< Element nodal coordinates
+real(kind=dp), intent(in)  :: x(nnodes),y(nnodes),z(nnodes)       !< Element nodal coordinates
 REAL(KIND=dp), intent(out) :: Metric(3,3)    !< Contravariant metric tensor
 REAL(KIND=dp), intent(in)  :: dLBasisdx(nDOFs,3) !< Derivatives of element basis function with respect to local coordinates
 REAL(KIND=dp), intent(out) :: DetG           !< SQRT of determinant of metric tensor
@@ -143,7 +145,7 @@ REAL(KIND=dp) :: dx(3,3),G(3,3),GI(3,3),s
 INTEGER :: GeomId     
 INTEGER :: cdim,i,j,k,n,imin,jmin
 !------------------------------------------------------------------------------
-associate(x=> nodes %x, y => nodes % y, z => nodes % z)
+!associate(x=> nodes %x, y => nodes % y, z => nodes % z)
 ! x => Nodes % x
 ! y => Nodes % y
 ! z => Nodes % z
@@ -161,7 +163,7 @@ DO i=1,dim
   dx(2,i) = SUM( y(1:n) * dLBasisdx(1:n,i) )
   dx(3,i) = SUM( z(1:n) * dLBasisdx(1:n,i) )
 END DO
-end associate
+    !end associate
 !------------------------------------------------------------------------------
 !    Compute the covariant metric tensor of the element coordinate system
 !------------------------------------------------------------------------------
@@ -361,11 +363,12 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   TYPE(Element_t), POINTER :: Element
   REAL(KIND=dp) :: Norm
   INTEGER :: n, nb, nd, t, active
-  INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state, MaxNumNodes
+  INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state, MaxNumNodes, MinNumNodes
   INTEGER :: ngp, i, dim, coorddim
   LOGICAL :: Found, VecAsm, InitHandles
   integer, allocatable :: n_active_in_col(:)
   real(KIND=dp), allocatable :: color_timing(:)
+  type(nodes_t) :: Nodes
 
 #ifdef _OPENMP
   LOGICAL :: initial_device
@@ -375,12 +378,13 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   type :: elem_ptr
     type(Element_t), pointer :: p
-    type(Nodes_t) :: nodes
+    !type(Nodes_t) :: nodes
     integer :: n, nd, nb                        ! nof nodes, nof dofs, nofbdofs
   end type
 
   type :: elem_list_t
     type(elem_ptr), allocatable :: elements(:)
+    real(kind=dp), allocatable :: x(:,:), y(:,:), z(:,:)
     !real(kind=dp), allocatable, target :: x(:,:), y(:,:), z(:,:)
   end type
 
@@ -388,21 +392,6 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   CHARACTER(*), PARAMETER :: Caller = 'AdvDiffSolver'
 
-
-
-  !interface 
-    !SUBROUTINE LocalMatrixVecSO( Element, n, nd, nb, VecAsm, Nodes, dim)
-!!------------------------------------------------------------------------------
-    !use types
-!
-    !INTEGER, INTENT(IN) :: n, nd, nb
-    !TYPE(Element_t), POINTER:: Element
-    !LOGICAL, INTENT(IN) :: VecAsm
-    !TYPE(Nodes_t), intent(in) :: Nodes
-    !INTEGER :: dim
-    !end subroutine LocalMatrixVecSO
-  !end interface
-!------------------------------------------------------------------------------
 
   CALL Info(Caller,'------------------------------------------------')
   CALL Info(Caller,'Solving generic advection-diffusion-reaction PDE')
@@ -456,6 +445,8 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     allocate(elem_lists(col) % elements(active))
   end do
 
+  MaxNumNodes = 0
+  MinNumNodes = 10000
   !!$omp target enter data map(to:solver%mesh%elements)
   !!$omp target enter data map(to:elem_lists(1:nColours))
 
@@ -472,26 +463,40 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     !!$OMP END SINGLE
 
     !!$OMP DO
-    do t=1,active
-      Element => GetActiveElement(t)
-      elem_lists(col) % elements(t) % p => Element
-      elem_lists(col) % elements(t) % n = GetElementNOFNodes(Element)
-      elem_lists(col) % elements(t) % nd = GetElementNOFDOFs(Element)
-      elem_lists(col) % elements(t) % nb = GetElementNOFBDOFs(Element)
-      CALL GetElementNodesVec( elem_lists(col) % elements(t) % nodes,  elem_lists(col) % elements(t) % p)
-      !!$omp target enter data map(to: elem_lists(col) % elements(t) % n) nowait
-      !!$omp target enter data map(to: elem_lists(col) % elements(t) % nd) nowait
-      !!$omp target enter data map(to: elem_lists(col) % elements(t) % nb) nowait
-      !!$omp target enter data map(to: elem_lists(col) % elements(t) % nodes % xyz) nowait
-      !!$omp target enter data map(to: elem_lists(col) % elements(t) % nodes % x) nowait
-      !!$omp target enter data map(to: elem_lists(col) % elements(t) % nodes % y) nowait
-      !!$omp target enter data map(to: elem_lists(col) % elements(t) % nodes % z) nowait
-      MaxNumNodes = max(MaxNumNodes,elem_lists(col) % elements(t) % n)
+    do state=1,2
+      do t=1,active
+        Element => GetActiveElement(t)
+        CALL GetElementNodesVec( nodes,  Element)
+        if (state == 1) then
+          elem_lists(col) % elements(t) % p => Element
+          elem_lists(col) % elements(t) % n = GetElementNOFNodes(Element)
+          elem_lists(col) % elements(t) % nd = GetElementNOFDOFs(Element)
+          elem_lists(col) % elements(t) % nb = GetElementNOFBDOFs(Element)
+
+          ! CALL GetElementNodesVec( elem_lists(col) % elements(t) % nodes,  elem_lists(col) % elements(t) % p)
+
+          MaxNumNodes = max(MaxNumNodes, elem_lists(col) % elements(t) % n)
+          MinNumNodes = min(MinNumNodes, elem_lists(col) % elements(t) % n)
+        else
+          elem_lists(col) % x(:, t) = nodes % x(:)
+          elem_lists(col) % y(:, t) = nodes % y(:)
+          elem_lists(col) % z(:, t) = nodes % z(:)
+        end if
+      end do
+
+      if (state == 1) then
+        allocate( elem_lists(col) % x(maxnumnodes, active), &
+        elem_lists(col) % y(maxnumnodes, active), &
+        elem_lists(col) % z(maxnumnodes, active))
+      end if
     end do
-    !!$OMP END DO
+
+  !!$OMP END DO
   end do
   !!$OMP END PARALLEL
 
+
+  print *, 'Max/Min NumNodes:', MaxNumNodes, MinNumNodes
 
   nColours = GetNOFColours(Solver)
 
@@ -549,12 +554,18 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
         nb => elem_lists(col) % elements(t) % nb)
 
       CALL ModuleLocalMatrixVecSO(  n, nd+nb, nb, VecAsm, &
-                                    elem_lists(col)% elements(t) % nodes, coorddim, &
+                                    elem_lists(col) % x(1:n, t), &
+                                    elem_lists(col) % y(1:n, t), &
+                                    elem_lists(col) % z(1:n, t), &
+                                    coorddim, &
                                     refbasis, refdBasisdx, refip, ngp)
+      ! CALL ModuleLocalMatrixVecSO(  n, nd+nb, nb, VecAsm, &
+      !                               elem_lists(col)% elements(t) % nodes, &
+      !                               coorddim, &
+      !                               refbasis, refdBasisdx, refip, ngp)
       end associate
     END DO
     !$omp end target teams distribute parallel do
-    !$omp wait
 
 #ifdef NOGPU
     write (*, '(A, I4, I9, A)', advance='no') 'Color, #elems (', col, active,') '
