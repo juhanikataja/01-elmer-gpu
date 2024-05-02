@@ -50,6 +50,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, VecAsm, Nodes, dim, refbasis, refd
 
     DiffCoeff = 1._dp ! TODO: Material parameters must be communicated somehow to the solver
 
+!#ifdef DOIT
     do i=1,ngp
       do j = 1,dim
         do m = 1,nd
@@ -71,6 +72,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, VecAsm, Nodes, dim, refbasis, refd
       end do
     end do
 
+
     !basis(:,:) = refbasis(:,:)
 
 
@@ -86,6 +88,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, VecAsm, Nodes, dim, refbasis, refd
 
     CALL LinearForms_GradUdotGradU(ngp, nd, dim, dBasisdx, DetJ, STIFF, DiffCoeff )
     CALL LinearForms_UdotF(ngp, nd, refBasis, DetJ, SourceCoeff, FORCE)
+!#endif
 
 #ifdef DEBUGPRINT
 
@@ -174,6 +177,7 @@ END DO
 !------------------------------------------------------------------------------
 !    Convert the metric to contravariant base, and compute the SQRT(DetG)
 !------------------------------------------------------------------------------
+#ifdef CHECKDIMMETRIC
 SELECT CASE( dim )
 !------------------------------------------------------------------------------
 !      Line elements
@@ -202,6 +206,8 @@ CASE (2)
   !      Volume elements
   !------------------------------------------------------------------------------
 CASE (3)
+#endif
+
   DetG = G(1,1) * ( G(2,2)*G(3,3) - G(2,3)*G(3,2) ) + &
     G(1,2) * ( G(2,3)*G(3,1) - G(2,1)*G(3,3) ) + &
     G(1,3) * ( G(2,1)*G(3,2) - G(2,2)*G(3,1) )
@@ -210,7 +216,10 @@ CASE (3)
   CALL InvertMatrix3x3( G,GI,detG )
   Metric = GI
   DetG = SQRT(DetG)
+
+#ifdef CHECKDIMMETRIC
 END SELECT
+#endif
 
 !--------------------------------------------------------------------------------------
 !    Construct a transformation X = LtoGMap such that (grad B)(f(p)) = X(p) Grad b(p),
@@ -219,6 +228,7 @@ END SELECT
 !    If cdim > dim (e.g. a surface embedded in the 3-dimensional space), X is
 !    the transpose of the pseudo-inverse of Grad f.
 !-------------------------------------------------------------------------------
+
 DO i=1,cdim
   DO j=1,dim
     s = 0.0d0
@@ -337,6 +347,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   USE DefUtils
   USE Types
   use LocalMV
+  use omp_lib
 
   IMPLICIT NONE
 !------------------------------------------------------------------------------
@@ -354,6 +365,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   INTEGER :: ngp, i, dim, coorddim
   LOGICAL :: Found, VecAsm, InitHandles
   integer, allocatable :: n_active_in_col(:)
+  real(KIND=dp), allocatable :: color_timing(:)
 
 #ifdef _OPENMP
   LOGICAL :: initial_device
@@ -369,7 +381,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   type :: elem_list_t
     type(elem_ptr), allocatable :: elements(:)
-    real(kind=dp), allocatable, target :: x(:,:), y(:,:), z(:,:)
+    !real(kind=dp), allocatable, target :: x(:,:), y(:,:), z(:,:)
   end type
 
   TYPE(elem_list_t), allocatable :: elem_lists(:)
@@ -436,6 +448,8 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   allocate(elem_lists(nColours)) ! TODO: deallocate too
   allocate(n_active_in_col(nColours)) ! TODO: deallocate too
+
+  allocate(color_timing(nColours)) ! TODO: deallocate too
 
   do col = 1, nColours
     active = GetNOFActive(Solver)
@@ -509,45 +523,54 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     active = size(elem_lists(col) % elements, 1)
     !$omp target enter data map(to: elem_lists(col) % elements(1:active))
   end do
+  !$omp target enter data map(to: refbasis(1:ngp,1:nd), refdBasisdx(1:ngp,1:nd,1:3))
+  !$omp target enter data map(to: color_timing(1:nColours))
 #endif
 
   DO col=1,nColours
 
-    ! CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=1) ! TODO: this goes away
-    !Active = GetNOFActive(Solver) ! TODO: this goes away
-
-    call ResetTimer( Caller//'ColorLoop')
     active = size(elem_lists(col) % elements, 1)
-    
+
+    !CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=1) ! TODO: this goes away
+    !call ResetTimer( Caller//'ColorLoop')
 #ifndef NOGPU
-    !!$omp target data map(to: elem_lists(col) % elements(1:active))
-    !$omp target
+    color_timing(col) = omp_get_wtime() 
 #endif
-    !$omp teams distribute parallel do
+
+    !$omp target teams distribute parallel do
     DO t=1,Active
-      !totelem = totelem + 1
-      !Element => elem_lists(col) % elements(t) % p
       associate( &
         n => elem_lists(col) % elements(t) %n, &
         nd => elem_lists(col) % elements(t) % nd, &
         nb => elem_lists(col) % elements(t) % nb)
 
-      !n = elem_lists(col) % elements(t) % n
-      !nd = elem_lists(col) % elements(t) % nd
-      !nb = elem_lists(col) % elements(t) % nb
       CALL ModuleLocalMatrixVecSO(  n, nd+nb, nb, VecAsm, &
                                     elem_lists(col)% elements(t) % nodes, coorddim, &
                                     refbasis, refdBasisdx, refip, ngp)
       end associate
     END DO
-    !$omp end teams distribute parallel do
+    !$omp end target teams distribute parallel do
+    !$omp wait
+
+    !write (*, '(A, I4, I9, A)', advance='no') 'Color, #elems (', col, active,') '
+    !CALL CheckTimer(Caller//'ColorLoop',Delete=.TRUE.)
 #ifndef NOGPU
-    !$omp end target
-    !!$omp end target data
+    color_timing(col) = omp_get_wtime() - color_timing(col)
 #endif
-    write (*, '(A)', advance='no') col
-    CALL CheckTimer(Caller//'ColorLoop',Delete=.TRUE.)
   END DO
+
+#ifndef NOGPU
+    !$omp target exit data map(from: color_timing(1:nColours)
+#endif
+
+#ifndef NOGPU
+do col = 1,nColours
+   write (*, '(A, I4, A, F8.6, I9, E12.3)') 'Color ', col, ' time, #elems, quotient: ', &
+     color_timing(col), size(elem_lists(col) % elements, 1), color_timing(col)/size(elem_lists(col) % elements, 1)
+ end do
+#endif
+
+
 
     CALL CheckTimer(Caller//'BulkAssembly',Delete=.TRUE.)
   stop

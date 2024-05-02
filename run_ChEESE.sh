@@ -8,7 +8,7 @@
 ##
 ################################
  
-#SBATCH --time=00:10:00
+#SBATCH --time=00:05:00
 #SBATCH --job-name=ChEESE_test
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
@@ -25,6 +25,8 @@
 #SBATCH --gpus=1
 #SBATCH --gpus-per-node=1
 #SBATCH --gpus-per-task=1
+#SBATCH --mem=250G
+#SBATCH --exclusive
 
 ################## OpenMP Stuff ##########
 ## use only if you undersubscribe
@@ -35,6 +37,8 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 echo "running OpenMP on $SLURM_CPUS_PER_TASK"
 #export KMP_AFFINITY=compact
 #export KMP_DETERMINISTIC_REDUCTION=yes
+
+export CRAY_ACC_NO_ASYNC=0
 
 ## These control USM behaviour
 export CRAY_ACC_USE_UNIFIED_MEM=1

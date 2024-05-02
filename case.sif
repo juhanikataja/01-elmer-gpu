@@ -4,7 +4,7 @@
 
 Header
   CHECK KEYWORDS Warn
-  Mesh DB "." "winkel_035"
+  Mesh DB "." "winkel_05"
   Include Path ""
   Results Directory "results"
 End
@@ -18,7 +18,7 @@ Simulation
   Steady State Max Iterations = 1
   Output Intervals = 1
 
-  Mesh Levels = 1
+  Mesh Levels = 2
 
   Output Level = 20
 

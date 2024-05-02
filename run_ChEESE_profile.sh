@@ -25,6 +25,7 @@
 #SBATCH --gpus=1
 #SBATCH --gpus-per-node=1
 #SBATCH --gpus-per-task=1
+#SBATCH --mem=250G
 
 ################## OpenMP Stuff ##########
 ## use only if you undersubscribe
