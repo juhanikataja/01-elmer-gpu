@@ -2,7 +2,7 @@
 ! The BCs are just different compared to strutural case i.e. (3,7) -> (4,8).
 
 
-Header
+header
   CHECK KEYWORDS Warn
   Mesh DB "." "winkel_05"
   Include Path ""

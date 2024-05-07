@@ -26,6 +26,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --gpus-per-task=1
 #SBATCH --mem=250G
+#SBATCH --exclusive
 
 ################## OpenMP Stuff ##########
 ## use only if you undersubscribe
@@ -38,8 +39,8 @@ echo "running OpenMP on $SLURM_CPUS_PER_TASK"
 #export KMP_DETERMINISTIC_REDUCTION=yes
 
 ## These control USM behaviour
-export CRAY_ACC_USE_UNIFIED_MEM=1
-export HSA_XNACK=1
+export CRAY_ACC_USE_UNIFIED_MEM=0
+export HSA_XNACK=0
 export CRAY_ACC_DEBUG=0
 
 # This is some profiling thingy

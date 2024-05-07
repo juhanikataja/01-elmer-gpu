@@ -32,18 +32,18 @@
 ## use only if you undersubscribe
 ## the MPI tasks
 ##########################################
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=56
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 echo "running OpenMP on $SLURM_CPUS_PER_TASK"
 #export KMP_AFFINITY=compact
 #export KMP_DETERMINISTIC_REDUCTION=yes
 
-export CRAY_ACC_NO_ASYNC=0
+#export CRAY_ACC_NO_ASYNC=1
 
 ## These control USM behaviour
-export CRAY_ACC_USE_UNIFIED_MEM=1
-export HSA_XNACK=1
-export CRAY_ACC_DEBUG=0
+export CRAY_ACC_USE_UNIFIED_MEM=0
+export HSA_XNACK=0
+export CRAY_ACC_DEBUG=3
 
 ###### enable CSC provided modules #########
 ml use /appl/local/csc/modulefiles
