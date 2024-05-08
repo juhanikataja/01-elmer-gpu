@@ -6,7 +6,8 @@ CONTAINS
 SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, ip, ngp, elem)
 !------------------------------------------------------------------------------
     !USE LinearForms
-    USE Integration
+    use types, only: dp
+    USE Integration, only: GaussIntegrationPoints_t
     !use iso_c_binding
 #ifdef ASSEMBLE
     use DefUtils ! TODO: defaultupdateequations is here but defutils may not be used due to threadprivate module variables if
@@ -138,12 +139,45 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
 !------------------------------------------------------------------------------
 END SUBROUTINE ModuleLocalMatrixVecSO
 
+SUBROUTINE loop_over_active(active, elemdofs, x, y, z, dim, refbasis, refdBasisdx, refip, ngp)
+  use Types, only: dp
+  USE Integration, only: GaussIntegrationPoints_t
+  USE ISO_FORTRAN_ENV, ONLY : ERROR_UNIT 
+
+  implicit none
+
+  integer, intent(in) :: active, elemdofs(:,:), ngp, dim
+  real(kind=dp), intent(in) :: x(:,:), y(:,:), z(:,:), refBasis(:,:), refdBasisdx(:,:,:)
+  type(GaussIntegrationPoints_t), intent(in) :: refip
+
+  integer :: t, n, nd, nb
+
+  
+  write(ERROR_UNIT,'(A)') '=== TARGET DEBUG START ==='
+  !$omp target
+  !$omp teams distribute parallel do 
+  do t=1, active
+    n=elemdofs(t,1)
+    nd=elemdofs(t,2)
+    nb=elemdofs(t,3)
+    call ModuleLocalMatrixVecSO(n, nd+nb, nb, &
+                                    x, &
+                                    y, &
+                                    z, &
+                                    dim, &
+                                    refbasis, refdBasisdx, refip, ngp, t)
+  end do
+  !$omp end teams distribute parallel do
+  !$omp end target
+  write(ERROR_UNIT,'(A)') '=== TARGET DEBUG END ==='
+
+END SUBROUTINE
 
 !#endif  ! BUILDLOCALMV
 
 subroutine myElementMetric(nDOFs,nnodes,xx,yy,zz,dim,DetG,dLBasisdx,LtoGMap, elem)
 
-use Types, only: dp, nodes_t
+use Types, only: dp ! , nodes_t
 !use DefUtils
 implicit none
 !$omp declare target
@@ -224,7 +258,7 @@ CASE (2)
 CASE (3)
 #endif
 
-#if 0
+#if 1
   DetG = G(1,1) * ( G(2,2)*G(3,3) - G(2,3)*G(3,2) ) + &
     G(1,2) * ( G(2,3)*G(3,1) - G(2,1)*G(3,3) ) + &
     G(1,3) * ( G(2,1)*G(3,2) - G(2,2)*G(3,1) )
@@ -246,7 +280,7 @@ END SELECT
 !    the transpose of the pseudo-inverse of Grad f.
 !-------------------------------------------------------------------------------
 
-#if 0
+#if 1
 DO i=1,cdim
   DO j=1,dim
     s = 0.0d0
@@ -572,6 +606,21 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   DO col=1,nColours
 
+#ifdef NOGPU
+    color_timing(col) = CPUTime()
+#endif
+#ifndef NOGPU
+    color_timing(col) = omp_get_wtime() 
+#endif
+
+    active = size(elem_lists(col) % elemdofs, 1)
+  call loop_over_active(active, elem_lists(col) % elemdofs, &
+    elem_lists(col) % x, &
+    elem_lists(col) % y, &
+    elem_lists(col) % z, &
+    dim, refBasis, prefdBasisdx,refip, ngp)
+
+#if 0
     active = size(elem_lists(col) % elemdofs, 1)
     associate(x => elem_lists(col) % x, y => elem_lists(col) % y, z => elem_lists(col) % z)
 
@@ -588,7 +637,9 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   !call cray_acc_set_debug_global_level(3)
 
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG START ==='
+#endif
 
+#ifndef NOGPU
     !$omp target 
 #endif
     !$omp teams distribute parallel do
@@ -611,11 +662,13 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 #ifndef NOGPU
     !$omp end target 
 #endif
+
 write(ERROR_UNIT,'(A)') '=== TARGET DEBUG END ==='
 
   !call cray_acc_set_debug_global_level(0)
 end associate
 
+#endif
 #ifdef NOGPU
     color_timing(col) = CPUTime() - color_timing(col)
 #endif
