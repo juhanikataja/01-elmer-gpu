@@ -4,7 +4,7 @@
 
 header
   CHECK KEYWORDS Warn
-  Mesh DB "." "winkel_015"
+  Mesh DB "." "winkel_035"
   Include Path ""
   Results Directory "results"
 End
@@ -59,6 +59,8 @@ Solver 1
   Nonlinear System Max Iterations = 1
   Nonlinear System Consistent Norm = True
   Steady State Convergence Tolerance = 1.0e-05
+
+  element = "p:2"
 
   !Linear System Save = True
 

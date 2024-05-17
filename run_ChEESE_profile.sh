@@ -8,11 +8,11 @@
 ##
 ################################
  
-#SBATCH --time=00:15:00
+#SBATCH --time=00:10:00
 #SBATCH --job-name=ChEESE_test
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
-#SBATCH --partition=dev-g
+#SBATCH --partition=standard-g
 
 ####### change to your project #######
 #SBATCH --account=project_462000007

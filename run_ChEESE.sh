@@ -43,7 +43,9 @@ echo "running OpenMP on $SLURM_CPUS_PER_TASK"
 ## These control USM behaviour
 export CRAY_ACC_USE_UNIFIED_MEM=0
 export HSA_XNACK=0
-export CRAY_ACC_DEBUG=3
+export CRAY_ACC_DEBUG=0
+export LIBOMPTARGET_KERNEL_TRACE=2
+
 
 ###### enable CSC provided modules #########
 ml use /appl/local/csc/modulefiles

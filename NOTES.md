@@ -13,6 +13,10 @@
 * Adding some `omp target enter data directives will speed execution lot
   - Without any `data` mapping directives it is SLOW
   - With the `enter data` we get 4-0.5 execution time of cpu
+
+# 2024-05-08
+
 * TODO: 
-  - [ ] glueing to global crs matrix
-  - [ ] performance tuning of the kernel (prior glueing)
+  - [ ] Test cpu perf on 035, 035x2 and 015 meshes and compare to gpu perf. Make note here: 
+  - [ ] Glueing to global crs matrix
+  - [ ] 

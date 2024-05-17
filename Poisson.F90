@@ -25,10 +25,11 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
 !------------------------------------------------------------------------------
 #define ngp_ 4
 #define nd_ 4
-    REAL(KIND=dp) :: Basis(ngp_,nd_)
-    real(kind=dp) :: dBasisdx(ngp_,nd_,3), DetJ(ngp_), dbasisdx_i(nd_,3)
-    REAL(KIND=dp) :: MASS(nd_,nd_), STIFF(nd_,nd_), FORCE(nd_)
-    REAL(KIND=dp) :: DiffCoeff(ngp_), SourceCoeff(ngp_)
+    REAL(KIND=dp) :: Basis(ngp,nd)
+    real(kind=dp) :: dBasisdx(ngp,nd,3), DetJ(ngp), dbasisdx_i(nd,3)
+    !REAL(KIND=dp) :: MASS(nd,nd), 
+    REAL(KIND=dp) :: STIFF(nd,nd), FORCE(nd)
+    REAL(KIND=dp) :: DiffCoeff(ngp), SourceCoeff(ngp)
     REAL(KIND=dp) :: LtoGMap(3,3), detg
     INTEGER :: j,k,m,i,l,t,p,q,ngp,allocstat
 
@@ -52,9 +53,6 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
 !#ifdef DOIT
 
     dbasisdx(:,:,:) = 0_dp
-    MASS  = 0._dp
-    STIFF = 0._dp
-    FORCE = 0._dp
 
     !LtoGMap(:,:) = 1_dp
     !detg = 1.0_dp
@@ -89,6 +87,9 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
     ! END DO
 
 
+    !MASS  = 0._dp
+    STIFF = 0._dp
+    FORCE = 0._dp
 #if 1
     do j=1,nd
       do i = 1,nd
