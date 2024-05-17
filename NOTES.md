@@ -18,5 +18,6 @@
 
 * TODO: 
   - [ ] Test cpu perf on 035, 035x2 and 015 meshes and compare to gpu perf. Make note here: 
+    - [ ] pretty ok when looking at profiler (~30us per color for 015 mesh)
   - [ ] Glueing to global crs matrix
-  - [ ] 
+  - [ ] p-elements
