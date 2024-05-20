@@ -1,1 +1,1 @@
-elmerf90 Poisson.F90 -o Poisson.so -g -DBUILDLOCALMV -DASSEMBLE # -DDEBUGPRINT
+elmerf90 Poisson.F90 -o Poisson.so -g -DBUILDLOCALMV -DNOGPU # -DDEBUGPRINT 

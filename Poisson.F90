@@ -447,6 +447,8 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
   CHARACTER(*), PARAMETER :: Caller = 'AdvDiffSolver'
 
+  INTEGER  :: SharedComm = -1, ierr
+
 
   CALL Info(Caller,'------------------------------------------------')
   CALL Info(Caller,'Solving generic advection-diffusion-reaction PDE')
@@ -485,6 +487,13 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   print *, 'initial_device:', initial_device
 #endif
 
+
+  ! Split communicator here to shared memory sub-communicators MPI_COMM_SPLIT_TYPE
+  if (SharedComm == -1) then
+    call MPI_COMM_SPLIT_TYPE(ParEnv % ActiveComm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, SharedComm, ierr)
+  end if
+  
+  ! Reserve shared memory to elem_lists, etc MPI_WIN_ALLOCATE_SHARED so that rank 0 can transfer that data to gpu
 
   nColours = GetNOFColours(Solver)
 

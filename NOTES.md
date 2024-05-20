@@ -18,6 +18,17 @@
 
 * TODO: 
   - [ ] Test cpu perf on 035, 035x2 and 015 meshes and compare to gpu perf. Make note here: 
-    - [ ] pretty ok when looking at profiler (~30us per color for 015 mesh)
+    - [ ] Pretty ok when looking at profiler (~300us per color for 015 mesh)
   - [ ] Glueing to global crs matrix
   - [ ] p-elements
+    - ElementInfoVec:iin lippu "IsReferenceElement". Tällöin ei lasketa mitään ylimääräistä (ltogmap yms), vaan ainoastaan suunnistukset CPU:lla.
+    - Lasketaan kantafunktiot kerran ja asetetaan paikoilleen. Sitten GPU:lla mäpätään ltogmap yms jutut.
+  - [o] Monta mpi rankkia?
+    - Dedikoidaan yksi rank / node, siirretään assemblydata sinne ja assembloidaan ja palautetaan rankeille:
+      MPI_COMM_SPLIT_TYPE(old_comm, split_type, key, info, new_comm). split_type = MPI_COMM_TYPE_SHARED 
+    - [o] Voiko koota assemblydatan rankeittain ja kopioida vain pointterin yhdelle rankille joka ajaa omp target regionin?
+    - Ei järkeä:
+      - Verkko pitää värittää jotta sen voi koota säikeistetysti
+      - paitsi jos laittaa pari rankkia per gpu (esim 4) jolloin väritys ei veisi liian pitkään
+  - [ ] mpi rank per gpu ? 
+
