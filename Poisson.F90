@@ -143,16 +143,21 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
     ! for lrow = 1:nd
     ! inds = rows(l2g(lrow):l2g(lrow)+1)
     ! ind2 = 
+#ifdef DEBUGPRINT
     if (round<3) print *, l2g(elem, :)
+#endif
     do i = 1,nd
       do j = 1,nd
         colind = 0
         do k = rows(l2g(elem,i)), (rows(l2g(elem,i)+1)-1)
           colind = colind + merge(k, 0, cols(k) == l2g(elem,j))
         end do
+
+#ifdef DEBUGPRINT
         if (round < 3) then 
           print *, colind, stiff(i,j), l2g(elem,i), l2g(elem,j)
         end if
+#endif
         values(colind) = values(colind) + stiff(i,j)
       end do
       rhs(l2g(elem,i)) = rhs(l2g(elem,i)) + force(i)
@@ -595,7 +600,6 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
       end do
 
       if (state == 1) then
-        print *, active, MaxNumDOFs, state, col
         allocate( elem_lists(col) % x(active, MaxNumNodes), &
                   elem_lists(col) % y(active, MaxNumNodes), &
                   elem_lists(col) % z(active, MaxNumNodes))
@@ -607,7 +611,6 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
         if (.not. allocated(indexes)) allocate(indexes(MaxNumDOFs))
 
         allocate(elem_lists(col) % l2g(active, MaxNumDOFs))
-        print *, 'ok'
       end if
     end do
 
