@@ -30,5 +30,6 @@
     - Ei järkeä:
       - Verkko pitää värittää jotta sen voi koota säikeistetysti
       - paitsi jos laittaa pari rankkia per gpu (esim 4) jolloin väritys ei veisi liian pitkään
-  - [ ] mpi rank per gpu ? 
-
+  - [o] mpi rank per gpu ? 
+  - Rocalution: CSR col-pointer pitää olla järjestetty (nouseva)
+  - `void rocalution::LocalMatrix::MultiColoring(int &num_colors, int **size_colors, LocalVector<int> *permutation) const`

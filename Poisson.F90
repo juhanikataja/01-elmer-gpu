@@ -3,7 +3,7 @@ module LocalMV
 CONTAINS
 !#ifdef BUILDLOCALMV
 
-SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, ip, ngp, elem)
+SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, ip, ngp, elem, l2g, values, cols, rows, rhs)
 !------------------------------------------------------------------------------
     !USE LinearForms
     use types, only: dp
@@ -17,11 +17,13 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
 !$omp declare target
 
 
-    INTEGER, INTENT(IN) :: n, nd, nb
+    INTEGER, INTENT(IN) :: n, nd, nb, l2g(:,:)
     real(kind=dp), intent(in) :: x(:,:), y(:,:), z(:,:)
     INTEGER, intent(in) :: dim, elem
     real(kind=dp), intent(in) :: refbasis(:,:), refdbasisdx(:,:,:)
     TYPE(GaussIntegrationPoints_t), intent(in) :: IP
+    integer, intent(in) :: cols(:), rows(:)
+    real(kind=dp), intent(inout) :: values(:), rhs(:)
 !------------------------------------------------------------------------------
 #define ngp_ 4
 #define nd_ 4
@@ -32,13 +34,13 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
     REAL(KIND=dp) :: DiffCoeff(ngp), SourceCoeff(ngp)
     REAL(KIND=dp) :: LtoGMap(3,3), detg
     INTEGER :: j,k,m,i,l,t,p,q,ngp,allocstat
-
+    INTEGER :: l_to_val_ind(nd, nd)
+    integer :: colind
     
 #ifdef DEBUGPRINT
     INTEGER :: round = 1 ! TODO
 #endif
-    !type(ElementType_t) :: refElementType
-    !LOGICAL, SAVE :: FirstTime=.TRUE.
+
     real(KIND=dp) :: dLBasisdx(nd, 3)
 !------------------------------------------------------------------------------
 
@@ -47,8 +49,6 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
     !IP = GaussPoints( Element )
     !ngp = IP % n
 
-    DiffCoeff = 1._dp ! TODO: Material parameters must be communicated somehow to the solver
-    sourcecoeff = 1._dp
 
 !#ifdef DOIT
 
@@ -90,6 +90,8 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
     !MASS  = 0._dp
     STIFF = 0._dp
     FORCE = 0._dp
+    DiffCoeff = 1._dp ! TODO: Material parameters must be communicated somehow to the solver
+    sourcecoeff = 1._dp
 #if 1
     do j=1,nd
       do i = 1,nd
@@ -116,7 +118,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
 #ifdef DEBUGPRINT
 
   if (round < 3) then
-    print *, '' 
+    print *, 'stiff' , round
     DO t=1,nd 
       write (*, '(12F9.4)') stiff(t,:)
     end do
@@ -137,18 +139,43 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
     CALL DefaultUpdateEquations(STIFF,FORCE,UElement=Element, VecAssembly=.true.)
 #endif
 
+    ! l2g(elem,1:nd) on rivit
+    ! for lrow = 1:nd
+    ! inds = rows(l2g(lrow):l2g(lrow)+1)
+    ! ind2 = 
+    if (round<3) print *, l2g(elem, :)
+    do i = 1,nd
+      do j = 1,nd
+        colind = 0
+        do k = rows(l2g(elem,i)), (rows(l2g(elem,i)+1)-1)
+          colind = colind + merge(k, 0, cols(k) == l2g(elem,j))
+        end do
+        if (round < 3) then 
+          print *, colind, stiff(i,j), l2g(elem,i), l2g(elem,j)
+        end if
+        values(colind) = values(colind) + stiff(i,j)
+      end do
+      rhs(l2g(elem,i)) = rhs(l2g(elem,i)) + force(i)
+    end do
+
 !------------------------------------------------------------------------------
 END SUBROUTINE ModuleLocalMatrixVecSO
 
-SUBROUTINE loop_over_active(active, elemdofs, x, y, z, dim, refbasis, refdBasisdx, refip, ngp)
+SUBROUTINE loop_over_active(active, elemdofs, x, y, z, dim, refbasis, refdBasisdx, refip, ngp, l2g, values, cols, rows, rhs)
   use Types, only: dp
   USE Integration, only: GaussIntegrationPoints_t
   USE ISO_FORTRAN_ENV, ONLY : ERROR_UNIT 
 
   implicit none
 
-  integer, intent(in) :: active, elemdofs(:,:), ngp, dim
-  real(kind=dp), intent(in) :: x(:,:), y(:,:), z(:,:), refBasis(:,:), refdBasisdx(:,:,:)
+  integer, intent(in) :: active, elemdofs(:,:), ngp, dim, &
+    l2g(:,:), cols(:), rows(:)
+
+  real(kind=dp), intent(in) :: x(:,:), y(:,:), z(:,:), &
+    refBasis(:,:), refdBasisdx(:,:,:)
+
+  real(kind=dp), intent(inout) :: values(:), rhs(:)
+
   type(GaussIntegrationPoints_t), intent(in) :: refip
 
   integer :: t, n, nd, nb
@@ -166,7 +193,8 @@ SUBROUTINE loop_over_active(active, elemdofs, x, y, z, dim, refbasis, refdBasisd
                                     y, &
                                     z, &
                                     dim, &
-                                    refbasis, refdBasisdx, refip, ngp, t)
+                                    refbasis, refdBasisdx, refip, ngp, t, &
+                                    l2g, values, cols, rows, rhs)
   end do
   !$omp end teams distribute parallel do
   !$omp end target
@@ -418,12 +446,14 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   TYPE(Element_t), POINTER :: Element
   REAL(KIND=dp) :: Norm
   INTEGER :: n, nb, nd, t, active
-  INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state, MaxNumNodes, MinNumNodes
-  INTEGER :: ngp, i, dim, coorddim
+  INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state, MaxNumNodes, MinNumNodes, MaxNumDOFs
+  INTEGER :: ngp, i, dim, coorddim, k
   LOGICAL :: Found, VecAsm, InitHandles
   integer, allocatable :: n_active_in_col(:)
   real(KIND=dp), allocatable :: color_timing(:)
   type(nodes_t) :: Nodes
+  type(Matrix_t), POINTER :: global_stiff
+  integer, allocatable :: indexes(:)
 
 #ifdef _OPENMP
   LOGICAL :: initial_device
@@ -440,6 +470,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   type :: elem_list_t
     integer, allocatable :: elemdofs(:,:)
     real(kind=dp), allocatable :: x(:,:), y(:,:), z(:,:)
+    integer, allocatable :: l2g(:,:)
     !real(kind=dp), allocatable, target :: x(:,:), y(:,:), z(:,:)
   end type
 
@@ -459,6 +490,17 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   maxiter = ListGetInteger( GetSolverParams(),&
       'Nonlinear System Max Iterations',Found,minv=1)
   IF(.NOT. Found ) maxiter = 1
+
+  global_stiff => Solver % Matrix
+
+  if ( global_stiff % format /= MATRIX_CRS) then
+    call fatal('AdvDiffSolver', 'stiffness matrix is not CRS matrix')
+  end if
+
+#ifndef NOGPU
+  !$omp target enter data map(to:matrix % values(:), matrix % rows(:), matrix % cols(:))
+#endif
+
 
   !$ nthr = omp_get_max_threads()
 
@@ -488,13 +530,6 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 #endif
 
 
-  ! Split communicator here to shared memory sub-communicators MPI_COMM_SPLIT_TYPE
-  if (SharedComm == -1) then
-    call MPI_COMM_SPLIT_TYPE(ParEnv % ActiveComm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, SharedComm, ierr)
-  end if
-  
-  ! Reserve shared memory to elem_lists, etc MPI_WIN_ALLOCATE_SHARED so that rank 0 can transfer that data to gpu
-
   nColours = GetNOFColours(Solver)
 
 
@@ -508,8 +543,6 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     allocate(elem_lists(col) % elemdofs(active,3)) ! n, nd, nb per column
   end do
 
-  MaxNumNodes = 0
-  MinNumNodes = 10000
   !!$omp target enter data map(to:solver%mesh%elemdofs)
   !!$omp target enter data map(to:elem_lists(1:nColours))
 
@@ -523,6 +556,9 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     !!$OMP SINGLE
     !!$omp target enter data map(to:elem_lists(col)) nowait
     active = GetNOFActive(Solver)
+  MaxNumNodes = 0
+  MinNumNodes = 10000
+  MaxNumDOFs = 0
     !!$OMP END SINGLE
 
     !!$OMP DO
@@ -544,17 +580,34 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
           MaxNumNodes = max(MaxNumNodes, elem_lists(col) % elemdofs(t,1))
           MinNumNodes = min(MinNumNodes, elem_lists(col) % elemdofs(t,1))
+          MaxNumDOFs = max(MaxNumDOFs, elem_lists(col) % elemdofs(t, 2))
         else
-          elem_lists(col) % x(t,:) = nodes % x(:)
-          elem_lists(col) % y(t,:) = nodes % y(:)
-          elem_lists(col) % z(t,:) = nodes % z(:)
+
+          associate (n => elem_lists(col) % elemdofs(t,1), nd => elem_lists(col) % elemdofs(t,2))
+            elem_lists(col) % x(t,1:n) = nodes % x(1:n)
+            elem_lists(col) % y(t,1:n) = nodes % y(1:n)
+            elem_lists(col) % z(t,1:n) = nodes % z(1:n)
+            nd = GetElementDOFs(indexes, Element, Solver)
+            !nd = GetElementDOFs(elem_lists(col) % l2g(t,:), Element, Solver)
+            elem_lists(col)%l2g(t,1:nd) = solver % variable % perm(indexes)
+          end associate
         end if
       end do
 
       if (state == 1) then
+        print *, active, MaxNumDOFs, state, col
         allocate( elem_lists(col) % x(active, MaxNumNodes), &
                   elem_lists(col) % y(active, MaxNumNodes), &
                   elem_lists(col) % z(active, MaxNumNodes))
+        if(allocated(indexes) .and. size(indexes,1) < MaxNumDOFs) then
+          deallocate(indexes)
+          allocate(indexes(MaxNumDOFs))
+        end if
+        
+        if (.not. allocated(indexes)) allocate(indexes(MaxNumDOFs))
+
+        allocate(elem_lists(col) % l2g(active, MaxNumDOFs))
+        print *, 'ok'
       end if
     end do
 
@@ -586,7 +639,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     call NodalBasisFunctions(nd, refBasis(i,:), element, refIP%u(i), refIP%v(i), refIP%w(i))
     call NodalFirstDerivatives(nd, refdBasisdx(i,:,:), element, refIP%u(i), refIP%v(i), refIP%w(i))
     prefdbasisdx(:,:,i) = refdBasisdx(i,:,:)
-    write (*,'(12F7.3)') refbasis(i,:)
+    write (*,'(12F7.3)') refbasis(i,1:nd)
   end do
 
   print *, '================================================'
@@ -610,15 +663,17 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 !$omp target enter data map(to: elem_lists(col) % x(:, :)) 
 !$omp target enter data map(to: elem_lists(col) % y(:, :))
 !$omp target enter data map(to: elem_lists(col) % z(:, :))
+!$omp target enter data map(to: elem_lists(col) % l2g(:,:))
   end do
 
 #endif
-
+global_stiff % values(:) = 0_dp
   DO col=1,nColours
 
 #ifdef NOGPU
     color_timing(col) = CPUTime()
 #endif
+
 #ifndef NOGPU
     color_timing(col) = omp_get_wtime() 
 #endif
@@ -628,57 +683,9 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     elem_lists(col) % x, &
     elem_lists(col) % y, &
     elem_lists(col) % z, &
-    dim, refBasis, prefdBasisdx,refip, ngp)
+    dim, refBasis, prefdBasisdx,refip, ngp, elem_lists(col) % l2g, &
+    global_stiff % values, global_stiff % cols, global_stiff % rows, global_stiff % rhs)
 
-#if 0
-    active = size(elem_lists(col) % elemdofs, 1)
-    associate(x => elem_lists(col) % x, y => elem_lists(col) % y, z => elem_lists(col) % z)
-
-    !CALL Info( Caller,'Assembly of colour: '//I2S(col),Level=1) ! TODO: this goes away
-
-
-#ifdef NOGPU
-    color_timing(col) = CPUTime()
-#endif
-
-#ifndef NOGPU
-    color_timing(col) = omp_get_wtime() 
-
-  !call cray_acc_set_debug_global_level(3)
-
-  write(ERROR_UNIT,'(A)') '=== TARGET DEBUG START ==='
-#endif
-
-#ifndef NOGPU
-    !$omp target 
-#endif
-    !$omp teams distribute parallel do
-    DO t=1,Active
-      associate( &
-        n => elem_lists(col) % elemdofs(t,1) , & ! n
-        nd => elem_lists(col) % elemdofs(t,2), & ! nd
-        nb => elem_lists(col) % elemdofs(t,3)) ! nb
-
-      CALL ModuleLocalMatrixVecSO(  n, nd+nb, nb, &
-                                    x, &
-                                    y, &
-                                    z, &
-                                    coorddim, &
-                                    refbasis, prefdBasisdx, refip, ngp, t)
-
-      end associate
-    END DO
-    !$omp end teams distribute parallel do
-#ifndef NOGPU
-    !$omp end target 
-#endif
-
-write(ERROR_UNIT,'(A)') '=== TARGET DEBUG END ==='
-
-  !call cray_acc_set_debug_global_level(0)
-end associate
-
-#endif
 #ifdef NOGPU
     color_timing(col) = CPUTime() - color_timing(col)
 #endif
@@ -702,10 +709,25 @@ write (*, '(A, I4, A, F8.6, I9, E12.3)') 'Color ', col, ' time, #elems, quotient
 
 
     CALL CheckTimer(Caller//'BulkAssembly',Delete=.TRUE.)
-  stop
+  !stop
   totelem = 0
 
   CALL DefaultFinishBulkAssembly()
+
+  open(newunit=t, file="cols.csv")
+  write(t, '(I5)') global_stiff % cols
+  close(t)
+
+  open(newunit=t, file="rows.csv")
+  write(t, '(I5)') global_stiff % rows
+  close(t)
+
+  open(newunit=t, file="values.csv")
+  write(t, '(F9.4)') global_stiff % values
+  close(t)
+
+  ! STOP
+
 
   nColours = GetNOFBoundaryColours(Solver)
   VecAsm = (nColours > 1) .OR. (nthr == 1)
