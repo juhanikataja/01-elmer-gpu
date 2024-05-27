@@ -3,7 +3,8 @@ module LocalMV
 CONTAINS
 !#ifdef BUILDLOCALMV
 
-SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, ip, ngp, elem, l2g, values, cols, rows, rhs)
+SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, & 
+    ip, ngp, elem, l2g, values, cols, rows, rhs, stiffs, forces, val_inds)
 !------------------------------------------------------------------------------
     !USE LinearForms
     use types, only: dp
@@ -23,7 +24,9 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
     real(kind=dp), intent(in) :: refbasis(:,:), refdbasisdx(:,:,:)
     TYPE(GaussIntegrationPoints_t), intent(in) :: IP
     integer, intent(in) :: cols(:), rows(:)
+    integer, intent(out) :: val_inds(:,:)
     real(kind=dp), intent(inout) :: values(:), rhs(:)
+    real(kind=dp), intent(inout) :: stiffs(:,:), forces(:,:)
 !------------------------------------------------------------------------------
 #define ngp_ 4
 #define nd_ 4
@@ -99,6 +102,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
           do l = 1,ngp
             stiff(i,j) = stiff(i,j) + dbasisdx(l,i,k)*dbasisdx(l,j,k)*diffcoeff(l)*detJ(l)*ip%s(l)
           end do
+          stiffs(elem,(i-1)*nd+j) = stiff(i,j)
         end do
       end do
     end do
@@ -107,6 +111,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
       do l = 1, ngp
         force(i) = force(i) + refbasis(l,i)*sourcecoeff(l)*detJ(l)*ip%s(l)
       end do
+      forces(elem,i) = force(i) ! TODO: add forces
     end do
 #endif
 
@@ -154,15 +159,18 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
           print *, colind, stiff(i,j), l2g(elem,i), l2g(elem,j)
         end if
 #endif
-        values(colind) = values(colind) + stiff(i,j)
+        !values(colind) = values(colind) + stiff(i,j)
+        val_inds(elem,(i-1)*nd+j) = colind
       end do
-      rhs(l2g(elem,i)) = rhs(l2g(elem,i)) + force(i)
+      !rhs(l2g(elem,i)) = rhs(l2g(elem,i)) + force(i)
     end do
 
 !------------------------------------------------------------------------------
 END SUBROUTINE ModuleLocalMatrixVecSO
 
-SUBROUTINE loop_over_active(active, elemdofs, x, y, z, dim, refbasis, refdBasisdx, refip, ngp, l2g, values, cols, rows, rhs)
+SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, refdBasisdx, &
+    refip, ngp, l2g, values, cols, rows, rhs)
+
   use Types, only: dp
   USE Integration, only: GaussIntegrationPoints_t
   USE ISO_FORTRAN_ENV, ONLY : ERROR_UNIT 
@@ -170,7 +178,7 @@ SUBROUTINE loop_over_active(active, elemdofs, x, y, z, dim, refbasis, refdBasisd
   implicit none
 
   integer, intent(in) :: active, elemdofs(:,:), ngp, dim, &
-    l2g(:,:), cols(:), rows(:)
+    l2g(:,:), cols(:), rows(:), max_nd
 
   real(kind=dp), intent(in) :: x(:,:), y(:,:), z(:,:), &
     refBasis(:,:), refdBasisdx(:,:,:)
@@ -179,27 +187,47 @@ SUBROUTINE loop_over_active(active, elemdofs, x, y, z, dim, refbasis, refdBasisd
 
   type(GaussIntegrationPoints_t), intent(in) :: refip
 
-  integer :: t, n, nd, nb
+  
+  real(kind=dp) :: stiffs(active, max_nd*max_nd), forces(active,max_nd)
+  integer :: val_inds(active, max_nd*max_nd)
+  integer :: elem, n, nd, nb, i, j 
 
   
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG START ==='
-  !$omp target
+  !$omp target data map(from: stiffs(:,:), val_inds(:,:))
+  !$omp target 
   !$omp teams distribute parallel do 
-  do t=1, active
-    n=elemdofs(t,1)
-    nd=elemdofs(t,2)
-    nb=elemdofs(t,3)
+  do elem=1, active
+    n=elemdofs(elem,1)
+    nd=elemdofs(elem,2)
+    nb=elemdofs(elem,3)
     call ModuleLocalMatrixVecSO(n, nd+nb, nb, &
-                                    x, &
-                                    y, &
-                                    z, &
-                                    dim, &
-                                    refbasis, refdBasisdx, refip, ngp, t, &
-                                    l2g, values, cols, rows, rhs)
+                                x, &
+                                y, &
+                                z, &
+                                dim, &
+                                refbasis, refdBasisdx, refip, ngp, elem, &
+                                l2g, values, cols, rows, rhs, stiffs, forces, val_inds) ! Here be stiffs and inds
   end do
   !$omp end teams distribute parallel do
   !$omp end target
+  !$omp end target data
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG END ==='
+
+  !No data races due to coloring
+  !$omp parallel do
+  do elem=1, active
+    nd=elemdofs(elem,2)
+    do i=1, nd
+      do j = 1, nd
+        associate(colind => val_inds(elem, (i-1)*nd+j) )
+          values(colind) = values(colind) + stiffs(elem, (i-1)*nd+j)
+        end associate
+      end do
+      rhs(l2g(elem, i)) = rhs(l2g(elem, i)) + forces(elem, i)
+    end do
+  end do
+  !$omp end parallel do
 
 END SUBROUTINE
 
@@ -678,7 +706,7 @@ global_stiff % values(:) = 0_dp
 #endif
 
     active = size(elem_lists(col) % elemdofs, 1)
-  call loop_over_active(active, elem_lists(col) % elemdofs, &
+  call loop_over_active(active, elem_lists(col) % elemdofs, MaxNumDOFs, &
     elem_lists(col) % x, &
     elem_lists(col) % y, &
     elem_lists(col) % z, &
@@ -725,7 +753,7 @@ write (*, '(A, I4, A, F8.6, I9, E12.3)') 'Color ', col, ' time, #elems, quotient
   write(t, '(F9.4)') global_stiff % values
   close(t)
 #endif
-   STOP
+   !STOP
 
 
   nColours = GetNOFBoundaryColours(Solver)
