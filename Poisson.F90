@@ -139,10 +139,6 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
     CALL DefaultUpdateEquations(STIFF,FORCE,UElement=Element, VecAssembly=.true.)
 #endif
 
-    ! l2g(elem,1:nd) on rivit
-    ! for lrow = 1:nd
-    ! inds = rows(l2g(lrow):l2g(lrow)+1)
-    ! ind2 = 
 #ifdef DEBUGPRINT
     if (round<3) print *, l2g(elem, :)
 #endif
@@ -503,7 +499,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   end if
 
 #ifndef NOGPU
-  !$omp target enter data map(to:matrix % values(:), matrix % rows(:), matrix % cols(:))
+  !$omp target enter data map(to:global_stiff % values(:), global_stiff % rows(:), global_stiff % cols(:), global_stiff % rhs(:))
 #endif
 
 
@@ -716,7 +712,7 @@ write (*, '(A, I4, A, F8.6, I9, E12.3)') 'Color ', col, ' time, #elems, quotient
   totelem = 0
 
   CALL DefaultFinishBulkAssembly()
-
+#if 0
   open(newunit=t, file="cols.csv")
   write(t, '(I5)') global_stiff % cols
   close(t)
@@ -728,8 +724,8 @@ write (*, '(A, I4, A, F8.6, I9, E12.3)') 'Color ', col, ' time, #elems, quotient
   open(newunit=t, file="values.csv")
   write(t, '(F9.4)') global_stiff % values
   close(t)
-
-  ! STOP
+#endif
+   STOP
 
 
   nColours = GetNOFBoundaryColours(Solver)

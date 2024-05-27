@@ -8,7 +8,7 @@
 ##
 ################################
  
-#SBATCH --time=00:05:00
+#SBATCH --time=00:15:00
 #SBATCH --job-name=ChEESE_test
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err

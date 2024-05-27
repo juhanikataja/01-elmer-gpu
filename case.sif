@@ -62,7 +62,7 @@ Solver 1
 
   !element = "p:2"
 
-  Linear System Save = True
+  Linear System Save = False
 
 ! Add some timing info
   Linear System Timing = True
