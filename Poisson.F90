@@ -215,19 +215,25 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG END ==='
 
   !No data races due to coloring
-  !$omp parallel do
-  do elem=1, active
-    nd=elemdofs(elem,2)
+  nd = max_nd ! TODO: masking!
+    !nd=elemdofs(elem,2)
     do i=1, nd
       do j = 1, nd
-        associate(colind => val_inds(elem, (i-1)*nd+j) )
-          values(colind) = values(colind) + stiffs(elem, (i-1)*nd+j)
-        end associate
+!$omp parallel do
+        do elem=1, active
+          associate(colind => val_inds(elem, (i-1)*nd+j) )
+            values(colind) = values(colind) + stiffs(elem, (i-1)*nd+j)
+          end associate
+        end do
+!$omp end parallel do
       end do
-      rhs(l2g(elem, i)) = rhs(l2g(elem, i)) + forces(elem, i)
+
+      !$omp parallel do
+      do elem=1, active
+        rhs(l2g(elem, i)) = rhs(l2g(elem, i)) + forces(elem, i)
+      end do
+      !$omp end parallel do
     end do
-  end do
-  !$omp end parallel do
 
 END SUBROUTINE
 
