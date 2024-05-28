@@ -12,7 +12,7 @@
 #SBATCH --job-name=ChEESE_test
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
-#SBATCH --partition=standard-g
+#SBATCH --partition=dev-g
 
 ####### change to your project #######
 #SBATCH --account=project_462000007
@@ -32,7 +32,7 @@
 ## use only if you undersubscribe
 ## the MPI tasks
 ##########################################
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=56
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 echo "running OpenMP on $SLURM_CPUS_PER_TASK"
 #export KMP_AFFINITY=compact

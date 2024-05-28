@@ -5,7 +5,7 @@ CONTAINS
 
 ! This subroutine will accumulate "stiffs" array from integration weights in parts
 SUBROUTINE AccumulateStiff( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, & 
-    ip, ngp, elem, stiffs, forces)
+    ip, elem, stiffs, forces)
 !------------------------------------------------------------------------------
     !USE LinearForms
     use types, only: dp
@@ -18,23 +18,22 @@ SUBROUTINE AccumulateStiff( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, &
     IMPLICIT NONE
 !$omp declare target
 
-
     INTEGER, INTENT(IN) :: n, nd, nb 
     real(kind=dp), intent(in) :: x(:,:), y(:,:), z(:,:)
     INTEGER, intent(in) :: dim, elem
-    real(kind=dp), intent(in) :: refbasis(:,:), refdbasisdx(:,:,:), ip(:)
+    real(kind=dp), intent(in) :: refbasis(:), refdbasisdx(:,:), ip
     !TYPE(GaussIntegrationPoints_t), intent(in) :: IP
     real(kind=dp), intent(inout) :: stiffs(:,:), forces(:,:)
 !------------------------------------------------------------------------------
 #define ngp_ 4
 #define nd_ 4
-    REAL(KIND=dp) :: Basis(ngp,nd)
-    real(kind=dp) :: dBasisdx(ngp,nd,3), DetJ(ngp), dbasisdx_i(nd,3)
+    REAL(KIND=dp) :: Basis(nd)
+    real(kind=dp) :: dBasisdx(nd,3)
     !REAL(KIND=dp) :: MASS(nd,nd), 
     REAL(KIND=dp) :: STIFF(nd,nd), FORCE(nd)
-    REAL(KIND=dp) :: DiffCoeff(ngp), SourceCoeff(ngp)
+    REAL(KIND=dp) :: DiffCoeff, SourceCoeff
     REAL(KIND=dp) :: LtoGMap(3,3), detg
-    INTEGER :: j,k,m,i,l,t,p,q,ngp,allocstat
+    INTEGER :: j,k,m,i,l,t,p,q,allocstat
     INTEGER :: l_to_val_ind(nd, nd)
     integer :: colind
     
@@ -51,31 +50,34 @@ SUBROUTINE AccumulateStiff( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, &
 
 !#ifdef DOIT
 
-    dbasisdx(:,:,:) = 0_dp
-
+    dbasisdx(:,:) = 0_dp
+#if 1
     !LtoGMap(:,:) = 1_dp
     !detg = 1.0_dp
-    do l=1,ngp
+    ! do l=1,ngp
       ! do j = 1,dim
       !   do m = 1,nd
       !     dLBasisdx(m,j) = refdBasisdx(m,j,l)
       !   end do
       ! end do
       
-      call myElementMetric(nd,n,x,y,z, dim, DetG, refdbasisdx(:,:,l), LtoGMap, elem)
+      ! TODO: testing effect of commenting this out
+      call myElementMetric(nd,n,x,y,z, dim, DetG, refdbasisdx(:,:), LtoGMap, elem)
+
       ! call myElementMetric(nd,n,x,y,z, dim, Metric, DetG, dLBasisdx, LtoGMap, elem)
 
-      detj(l) = detg
+      ! detj(l) = detg
 
-      do m = 1,nd
+      do k=1,dim
         do j=1,dim
-          do k=1,dim
-            dbasisdx(l,m,j) = dbasisdx(l,m,j) + refdbasisdx(m,k,l)*LtoGMap(j,k)
+          do m = 1,nd
+            dbasisdx(m,j) = dbasisdx(m,j) + refdbasisdx(m,k)*LtoGMap(j,k)
             ! dbasisdx(l,m,j) = dbasisdx(l,m,j) + dLBasisdx(m,k)*LtoGMap(j,k)
           end do 
         end do
       end do
-    end do
+#endif
+    ! end do
 
 
 
@@ -92,22 +94,34 @@ SUBROUTINE AccumulateStiff( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, &
     DiffCoeff = 1._dp ! TODO: Material parameters must be communicated somehow to the solver
     sourcecoeff = 1._dp
 #if 1
-    do j=1,nd
-      do i = 1,nd
-        do k = 1,dim
-          do l = 1,ngp
-            stiff(i,j) = stiff(i,j) + dbasisdx(l,i,k)*dbasisdx(l,j,k)*diffcoeff(l)*detJ(l)*ip(l)
-          end do
-          stiffs(elem,(i-1)*nd+j) = stiff(i,j)
+    do k = 1, dim
+      do j= 1, nd
+        do i = 1, nd
+          !do l = 1,ngp
+          !   stiff(i,j) = stiff(i,j) + dbasisdx(l,i,k)*dbasisdx(l,j,k)*diffcoeff(l)*detJ(l)*ip
+          !end do
+
+          stiff(i,j) = stiff(i,j) + dbasisdx(i,k)*dbasisdx(j,k)
+
+          ! stiffs(elem,(i-1)*nd+j) = stiff(i,j)
+          !stiffs(elem,(i-1)*nd+j) = stiffs(elem,(i-1)*nd+j) + dbasisdx(i,k)*dbasisdx(j,k)*diffcoeff*detg*ip
         end do
       end do
     end do
 
-    do i = 1,nd
-      do l = 1, ngp
-        force(i) = force(i) + refbasis(l,i)*sourcecoeff(l)*detJ(l)*ip(l)
-      end do
-      forces(elem,i) = force(i) ! TODO: add forces
+    stiffs(elem,1:nd*nd) = stiffs(elem,1:nd*nd) + diffcoeff*detg*ip*stiff(:)
+    !do k = 1,nd
+      ! stiffs(elem, 1) = stiffs(elem,1) + stiff(1,1)
+    !end do
+#endif
+
+#if 1
+    do i = 1, nd
+      !do l = 1, ngp
+        ! force(i) = force(i) + refbasis(l)*sourcecoeff(l)*detJ(l)*ip
+      !end do
+      ! forces(elem,i) = force(i) ! TODO: add forces
+      forces(elem,i) = forces(elem,i) + refbasis(i)*sourcecoeff*detg*ip
     end do
 #endif
 
@@ -340,14 +354,20 @@ SUBROUTINE loop_over_active_2(active, elemdofs, max_nd, x, y, z, dim, refbasis, 
   !$omp end teams distribute parallel do
   !$omp end target
 
+  write(ERROR_UNIT,'(A)') '=== TARGET INIT 1 ==='
+
   !$omp target 
   !$omp teams distribute parallel do
     do elem=1, active
+      n=elemdofs(elem,1)
+      nd=elemdofs(elem,2)
+      nb=elemdofs(elem,3)
       call get_crs_inds(val_inds, rows, cols, l2g, nd+nb, elem)
     end do
   !$omp end teams distribute parallel do
   !$omp end target
 
+  write(ERROR_UNIT,'(A)') '=== TARGET INIT 2 ==='
 
   !$omp target
   !$omp teams distribute parallel do 
@@ -360,7 +380,7 @@ SUBROUTINE loop_over_active_2(active, elemdofs, max_nd, x, y, z, dim, refbasis, 
       y, &
       z, &
       dim, &
-      refbasis, refdBasisdx, refip%s(1:3), 3, elem, &
+      refbasis(:,1), refdBasisdx(:,:,1), refip%s(1), elem, &
       stiffs, forces) ! Here be stiffs and inds
   end do
   !$omp end teams distribute parallel do
@@ -369,6 +389,7 @@ SUBROUTINE loop_over_active_2(active, elemdofs, max_nd, x, y, z, dim, refbasis, 
   !$omp end target data
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG END ==='
 
+#if 0
   !No data races due to coloring
   nd = max_nd ! TODO: masking!
     !nd=elemdofs(elem,2)
@@ -389,6 +410,7 @@ SUBROUTINE loop_over_active_2(active, elemdofs, max_nd, x, y, z, dim, refbasis, 
       end do
       !$omp end parallel do
     end do
+#endif
 
 END SUBROUTINE loop_over_active_2
 
@@ -718,7 +740,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 #ifdef _OPENMP
   LOGICAL :: initial_device
 #endif
-  REAL(KIND=dp), ALLOCATABLE :: refBasis(:,:), refdBasisdx(:,:,:), prefBasis(:,:), prefdBasisdx(:,:,:)
+  REAL(KIND=dp), ALLOCATABLE :: refBasis(:,:), refdBasisdx(:,:,:), prefBasis(:,:), prefdBasisdx(:,:,:), trefbasis(:,:)
   TYPE(GaussIntegrationPoints_t) :: refIP
 
   type :: elem_ptr
@@ -882,6 +904,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   print *, '==REFERENCE BASIS FUNCTION VALUES==============='
 
   !Element => elem_lists(1) % elements(1) % p
+  ! TODO: here we assume that all elements are the same
   dim = CoordinateSystemDimension()
   refIP = GaussPoints( Element )
   ngp = refIP % n
@@ -889,15 +912,19 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   print *, 'NGP:', ngp
 
   allocate(refbasis(ngp, nd), refdbasisdx(ngp, nd, 3))
-  allocate(prefdBasisdx(nd,3,ngp))
+  allocate(prefdBasisdx(nd,3,ngp), trefbasis(nd, ngp))
 
   refbasis = 0_dp
+  trefbasis = 0_dp
   refdBasisdx = 0_dp
   do i=1,ngp
     call NodalBasisFunctions(nd, refBasis(i,:), element, refIP%u(i), refIP%v(i), refIP%w(i))
     call NodalFirstDerivatives(nd, refdBasisdx(i,:,:), element, refIP%u(i), refIP%v(i), refIP%w(i))
     prefdbasisdx(:,:,i) = refdBasisdx(i,:,:)
     write (*,'(12F7.3)') refbasis(i,1:nd)
+  end do
+  do i=1,ngp
+    trefbasis(:,i) = refbasis(i,:)
   end do
 
   print *, '================================================'
@@ -908,7 +935,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   CALL ResetTimer( Caller//'BulkAssembly' )
 #ifndef NOGPU
 
-!$omp target enter data map(to:elem_lists, elem_lists(1:ncolours), refbasis, prefdBasisdx)
+!$omp target enter data map(to:elem_lists, elem_lists(1:ncolours), refbasis, prefdBasisdx, trefbasis(:,:))
 !$omp target enter data map(to: refbasis(1:ngp,1:nd), prefdBasisdx(1:nd,1:3,1:ngp)) 
 !$omp target enter data map(to: refip%u(1:ngp), refip%v(1:ngp), refip%w(1:ngp), refip, refip%u, refip%v, refip%w, refip%s) 
 !$omp target enter data map(to: refip%s(1:ngp))
@@ -941,7 +968,7 @@ global_stiff % values(:) = 0_dp
     elem_lists(col) % x, &
     elem_lists(col) % y, &
     elem_lists(col) % z, &
-    dim, refBasis, prefdBasisdx,refip, ngp, elem_lists(col) % l2g, &
+    dim, trefBasis, prefdBasisdx,refip, ngp, elem_lists(col) % l2g, &
     global_stiff % values, global_stiff % cols, global_stiff % rows, global_stiff % rhs)
 
 #ifdef NOGPU
@@ -1099,7 +1126,6 @@ CONTAINS
               IP % W(t), detJ, Basis, dBasisdx )
 
       Weight = IP % s(t) * DetJ
-
       ! Evaluate terms at the integration point:
       !------------------------------------------
 

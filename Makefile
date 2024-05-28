@@ -26,8 +26,11 @@ buildprof:
 buildwasms:
 	ELMERSOLVER_LINK_LIBRARY=-lelmersolverstatic elmerf90 -O3 Poisson.F90 -o Poisson.so -DBUILDLOCALMV -DPROFILING -hkeepfiles
 
-buildcpu: 
+buildcpuprof: 
 	ELMERSOLVER_LINK_LIBRARY=-lelmersolverstatic elmerf90 -O3 Poisson.F90 -o Poisson.so -DBUILDLOCALMV -DNOGPU -DPROFILING
+
+buildcpu: 
+	ELMERSOLVER_LINK_LIBRARY=-lelmersolverstatic elmerf90 -O3 Poisson.F90 -o Poisson.so -DBUILDLOCALMV -DNOGPU
 
 tailout: 
 	tail -f `ls *.out|tail -n 1`
