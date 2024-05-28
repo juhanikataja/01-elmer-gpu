@@ -3,6 +3,140 @@ module LocalMV
 CONTAINS
 !#ifdef BUILDLOCALMV
 
+! This subroutine will accumulate "stiffs" array from integration weights in parts
+SUBROUTINE AccumulateStiff( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, & 
+    ip, ngp, elem, stiffs, forces)
+!------------------------------------------------------------------------------
+    !USE LinearForms
+    use types, only: dp
+    USE Integration, only: GaussIntegrationPoints_t
+    !use iso_c_binding
+#ifdef ASSEMBLE
+    use DefUtils ! TODO: defaultupdateequations is here but defutils may not be used due to threadprivate module variables if
+                 ! declare target is set
+#endif
+    IMPLICIT NONE
+!$omp declare target
+
+
+    INTEGER, INTENT(IN) :: n, nd, nb 
+    real(kind=dp), intent(in) :: x(:,:), y(:,:), z(:,:)
+    INTEGER, intent(in) :: dim, elem
+    real(kind=dp), intent(in) :: refbasis(:,:), refdbasisdx(:,:,:), ip(:)
+    !TYPE(GaussIntegrationPoints_t), intent(in) :: IP
+    real(kind=dp), intent(inout) :: stiffs(:,:), forces(:,:)
+!------------------------------------------------------------------------------
+#define ngp_ 4
+#define nd_ 4
+    REAL(KIND=dp) :: Basis(ngp,nd)
+    real(kind=dp) :: dBasisdx(ngp,nd,3), DetJ(ngp), dbasisdx_i(nd,3)
+    !REAL(KIND=dp) :: MASS(nd,nd), 
+    REAL(KIND=dp) :: STIFF(nd,nd), FORCE(nd)
+    REAL(KIND=dp) :: DiffCoeff(ngp), SourceCoeff(ngp)
+    REAL(KIND=dp) :: LtoGMap(3,3), detg
+    INTEGER :: j,k,m,i,l,t,p,q,ngp,allocstat
+    INTEGER :: l_to_val_ind(nd, nd)
+    integer :: colind
+    
+#ifdef DEBUGPRINT
+    INTEGER :: round = 1 ! TODO
+#endif
+
+    real(KIND=dp) :: dLBasisdx(nd, 3)
+!------------------------------------------------------------------------------
+
+    
+    !dim = CoordinateSystemDimension()
+
+
+!#ifdef DOIT
+
+    dbasisdx(:,:,:) = 0_dp
+
+    !LtoGMap(:,:) = 1_dp
+    !detg = 1.0_dp
+    do l=1,ngp
+      ! do j = 1,dim
+      !   do m = 1,nd
+      !     dLBasisdx(m,j) = refdBasisdx(m,j,l)
+      !   end do
+      ! end do
+      
+      call myElementMetric(nd,n,x,y,z, dim, DetG, refdbasisdx(:,:,l), LtoGMap, elem)
+      ! call myElementMetric(nd,n,x,y,z, dim, Metric, DetG, dLBasisdx, LtoGMap, elem)
+
+      detj(l) = detg
+
+      do m = 1,nd
+        do j=1,dim
+          do k=1,dim
+            dbasisdx(l,m,j) = dbasisdx(l,m,j) + refdbasisdx(m,k,l)*LtoGMap(j,k)
+            ! dbasisdx(l,m,j) = dbasisdx(l,m,j) + dLBasisdx(m,k)*LtoGMap(j,k)
+          end do 
+        end do
+      end do
+    end do
+
+
+
+    ! PART ONE: Collect local stiffness to STIFF using experimental method
+
+    ! DO t=1,ngp
+    !   DetJ(t) = IP % s(t) * Detj(t)
+    ! END DO
+
+
+    !MASS  = 0._dp
+    STIFF = 0._dp
+    FORCE = 0._dp
+    DiffCoeff = 1._dp ! TODO: Material parameters must be communicated somehow to the solver
+    sourcecoeff = 1._dp
+#if 1
+    do j=1,nd
+      do i = 1,nd
+        do k = 1,dim
+          do l = 1,ngp
+            stiff(i,j) = stiff(i,j) + dbasisdx(l,i,k)*dbasisdx(l,j,k)*diffcoeff(l)*detJ(l)*ip(l)
+          end do
+          stiffs(elem,(i-1)*nd+j) = stiff(i,j)
+        end do
+      end do
+    end do
+
+    do i = 1,nd
+      do l = 1, ngp
+        force(i) = force(i) + refbasis(l,i)*sourcecoeff(l)*detJ(l)*ip(l)
+      end do
+      forces(elem,i) = force(i) ! TODO: add forces
+    end do
+#endif
+
+!------------------------------------------------------------------------------
+END SUBROUTINE AccumulateStiff
+!------------------------------------------------------------------------------
+
+!------------------------------------------------------------------------------
+SUBROUTINE get_crs_inds(val_inds, rows, cols, l2g, nd, elem)
+    IMPLICIT NONE
+!$omp declare target
+!------------------------------------------------------------------------------
+    INTEGER, INTENT(IN) :: nd, rows(:), cols(:), l2g(:,:), elem
+    INTEGER, INTENT(OUT) :: val_inds(:,:)
+!------------------------------------------------------------------------------
+    INTEGER :: colind, i, j, k
+
+    do i = 1,nd
+      do j = 1,nd
+        colind = 0
+        do k = rows(l2g(elem,i)), (rows(l2g(elem,i)+1)-1)
+          colind = colind + merge(k, 0, cols(k) == l2g(elem,j))
+        end do
+        val_inds(elem,(i-1)*nd+j) = colind
+      end do
+    end do
+
+END SUBROUTINE get_crs_inds
+
 SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, & 
     ip, ngp, elem, l2g, values, cols, rows, rhs, stiffs, forces, val_inds)
 !------------------------------------------------------------------------------
@@ -168,6 +302,97 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
 !------------------------------------------------------------------------------
 END SUBROUTINE ModuleLocalMatrixVecSO
 
+
+SUBROUTINE loop_over_active_2(active, elemdofs, max_nd, x, y, z, dim, refbasis, refdBasisdx, &
+    refip, ngp, l2g, values, cols, rows, rhs)
+
+  use Types, only: dp
+  USE Integration, only: GaussIntegrationPoints_t
+  USE ISO_FORTRAN_ENV, ONLY : ERROR_UNIT 
+
+  implicit none
+
+  integer, intent(in) :: active, elemdofs(:,:), ngp, dim, &
+    l2g(:,:), cols(:), rows(:), max_nd
+
+  real(kind=dp), intent(in) :: x(:,:), y(:,:), z(:,:), &
+    refBasis(:,:), refdBasisdx(:,:,:)
+
+  real(kind=dp), intent(inout) :: values(:), rhs(:)
+
+  type(GaussIntegrationPoints_t), intent(in) :: refip
+
+  
+  real(kind=dp) :: stiffs(active, max_nd*max_nd), forces(active,max_nd)
+  integer :: val_inds(active, max_nd*max_nd)
+  integer :: elem, n, nd, nb, i, j 
+
+  
+  write(ERROR_UNIT,'(A)') '=== TARGET DEBUG START ==='
+
+  !$omp target data map(from: stiffs(:,:), val_inds(:,:), forces(:,:))
+  !$omp target 
+  !$omp teams distribute parallel do
+    do elem=1, active
+      stiffs(elem,:) = 0_dp
+      forces(elem,:) = 0_dp
+    end do
+  !$omp end teams distribute parallel do
+  !$omp end target
+
+  !$omp target 
+  !$omp teams distribute parallel do
+    do elem=1, active
+      call get_crs_inds(val_inds, rows, cols, l2g, nd+nb, elem)
+    end do
+  !$omp end teams distribute parallel do
+  !$omp end target
+
+
+  !$omp target
+  !$omp teams distribute parallel do 
+  do elem=1, active
+    n=elemdofs(elem,1)
+    nd=elemdofs(elem,2)
+    nb=elemdofs(elem,3)
+      call AccumulateStiff(n, nd+nb, nb, &
+      x, &
+      y, &
+      z, &
+      dim, &
+      refbasis, refdBasisdx, refip%s(1:3), 3, elem, &
+      stiffs, forces) ! Here be stiffs and inds
+  end do
+  !$omp end teams distribute parallel do
+  !$omp end target
+
+  !$omp end target data
+  write(ERROR_UNIT,'(A)') '=== TARGET DEBUG END ==='
+
+  !No data races due to coloring
+  nd = max_nd ! TODO: masking!
+    !nd=elemdofs(elem,2)
+    do i=1, nd
+      do j = 1, nd
+!$omp parallel do
+        do elem=1, active
+          associate(colind => val_inds(elem, (i-1)*nd+j) )
+            values(colind) = values(colind) + stiffs(elem, (i-1)*nd+j)
+          end associate
+        end do
+!$omp end parallel do
+      end do
+
+      !$omp parallel do
+      do elem=1, active
+        rhs(l2g(elem, i)) = rhs(l2g(elem, i)) + forces(elem, i)
+      end do
+      !$omp end parallel do
+    end do
+
+END SUBROUTINE loop_over_active_2
+
+    
 SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, refdBasisdx, &
     refip, ngp, l2g, values, cols, rows, rhs)
 
@@ -235,7 +460,7 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
       !$omp end parallel do
     end do
 
-END SUBROUTINE
+END SUBROUTINE loop_over_active
 
 !#endif  ! BUILDLOCALMV
 
@@ -712,7 +937,7 @@ global_stiff % values(:) = 0_dp
 #endif
 
     active = size(elem_lists(col) % elemdofs, 1)
-  call loop_over_active(active, elem_lists(col) % elemdofs, MaxNumDOFs, &
+  call loop_over_active_2(active, elem_lists(col) % elemdofs, MaxNumDOFs, &
     elem_lists(col) % x, &
     elem_lists(col) % y, &
     elem_lists(col) % z, &
