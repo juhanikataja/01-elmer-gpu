@@ -41,7 +41,7 @@ echo "running OpenMP on $SLURM_CPUS_PER_TASK"
 ## These control USM behaviour
 export CRAY_ACC_USE_UNIFIED_MEM=0
 export HSA_XNACK=0
-export CRAY_ACC_DEBUG=0
+export CRAY_ACC_DEBUG=2
 
 # This is some profiling thingy
 export LD_PRELOAD=./libpreload-me.so
@@ -75,5 +75,4 @@ ml myelmer/offload
 #srun rocprof --stats --sys-trace -i trace_profile.txt ElmerSolver case.sif
 srun rocminfo
 srun rocprof --stats -i trace_profile.txt ElmerSolver case.sif
-#ElmerSolver case.sif
-#srun rocprof --stats --hip-trace -i trace_profile.txt ElmerSolver case.sif
+srun rocprof --stats --hip-trace ElmerSolver case.sif

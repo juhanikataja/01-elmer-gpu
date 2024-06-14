@@ -4,12 +4,11 @@ CONTAINS
 !#ifdef BUILDLOCALMV
 
 ! This subroutine will accumulate "stiffs" array from integration weights in parts
-SUBROUTINE AccumulateStiff( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, & 
+SUBROUTINE AccumulateStiff( n, nd, x, y, z, dim, refbasis, refdBasisdx, & 
     ip, elem, stiffs, forces)
 !------------------------------------------------------------------------------
     !USE LinearForms
     use types, only: dp
-    USE Integration, only: GaussIntegrationPoints_t
     !use iso_c_binding
 #ifdef ASSEMBLE
     use DefUtils ! TODO: defaultupdateequations is here but defutils may not be used due to threadprivate module variables if
@@ -18,11 +17,10 @@ SUBROUTINE AccumulateStiff( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, &
     IMPLICIT NONE
 !$omp declare target
 
-    INTEGER, INTENT(IN) :: n, nd, nb 
+    INTEGER, INTENT(IN) :: n, nd
     real(kind=dp), intent(in) :: x(:,:), y(:,:), z(:,:)
     INTEGER, intent(in) :: dim, elem
     real(kind=dp), intent(in) :: refbasis(:), refdbasisdx(:,:), ip
-    !TYPE(GaussIntegrationPoints_t), intent(in) :: IP
     real(kind=dp), intent(inout) :: stiffs(:,:), forces(:,:)
 !------------------------------------------------------------------------------
 #define ngp_ 4
@@ -34,14 +32,12 @@ SUBROUTINE AccumulateStiff( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, &
     REAL(KIND=dp) :: DiffCoeff, SourceCoeff
     REAL(KIND=dp) :: LtoGMap(3,3), detg
     INTEGER :: j,k,m,i,l,t,p,q,allocstat
-    INTEGER :: l_to_val_ind(nd, nd)
     integer :: colind
     
 #ifdef DEBUGPRINT
     INTEGER :: round = 1 ! TODO
 #endif
 
-    real(KIND=dp) :: dLBasisdx(nd, 3)
 !------------------------------------------------------------------------------
 
     
@@ -54,25 +50,16 @@ SUBROUTINE AccumulateStiff( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, &
 #if 1
     !LtoGMap(:,:) = 1_dp
     !detg = 1.0_dp
-    ! do l=1,ngp
-      ! do j = 1,dim
-      !   do m = 1,nd
-      !     dLBasisdx(m,j) = refdBasisdx(m,j,l)
-      !   end do
-      ! end do
       
       ! TODO: testing effect of commenting this out
       call myElementMetric(nd,n,x,y,z, dim, DetG, refdbasisdx(:,:), LtoGMap, elem)
 
-      ! call myElementMetric(nd,n,x,y,z, dim, Metric, DetG, dLBasisdx, LtoGMap, elem)
-
-      ! detj(l) = detg
+      ! detj(l) = detg ! When using array of integration points
 
       do k=1,dim
         do j=1,dim
           do m = 1,nd
             dbasisdx(m,j) = dbasisdx(m,j) + refdbasisdx(m,k)*LtoGMap(j,k)
-            ! dbasisdx(l,m,j) = dbasisdx(l,m,j) + dLBasisdx(m,k)*LtoGMap(j,k)
           end do 
         end do
       end do
@@ -90,10 +77,8 @@ SUBROUTINE AccumulateStiff( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, &
 
     !MASS  = 0._dp
     STIFF = 0._dp
-    FORCE = 0._dp
     DiffCoeff = 1._dp ! TODO: Material parameters must be communicated somehow to the solver
-    sourcecoeff = 1._dp
-#if 1
+#if 0
     do k = 1, dim
       do j= 1, nd
         do i = 1, nd
@@ -108,26 +93,53 @@ SUBROUTINE AccumulateStiff( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, &
         end do
       end do
     end do
-
-    stiffs(elem,1:nd*nd) = stiffs(elem,1:nd*nd) + diffcoeff*detg*ip*stiff(:)
-    !do k = 1,nd
-      ! stiffs(elem, 1) = stiffs(elem,1) + stiff(1,1)
-    !end do
 #endif
 
+#if 0
+    diffcoeff = diffcoeff*detg*ip
+    do j = 1, nd
+      k = (j-1)*nd
+      do i = 1, nd
+        stiffs(elem,k+i) = stiffs(elem, k+i) + diffcoeff*stiff(i,j)
+      end do 
+    end do
+#endif
+
+
 #if 1
+FORCE = 1._dp
+sourcecoeff = 1._dp
     do i = 1, nd
       !do l = 1, ngp
         ! force(i) = force(i) + refbasis(l)*sourcecoeff(l)*detJ(l)*ip
       !end do
       ! forces(elem,i) = force(i) ! TODO: add forces
-      forces(elem,i) = forces(elem,i) + refbasis(i)*sourcecoeff*detg*ip
+      forces(elem,i) = forces(elem,i) + refbasis(i)*sourcecoeff*detg*ip + dbasisdx(i,1)
     end do
 #endif
 
 !------------------------------------------------------------------------------
 END SUBROUTINE AccumulateStiff
 !------------------------------------------------------------------------------
+
+!------------------------------------------------------------------------------
+SUBROUTINE AccumulateForce(forces, elem, nd, refbasis, sourcecoeff, detg, ip)
+!------------------------------------------------------------------------------
+  use types, only: dp
+  IMPLICIT NONE 
+  !$omp declare target
+!------------------------------------------------------------------------------
+  REAL(kind=dp), INTENT(OUT) :: forces(:,:)
+  INTEGER, INTENT(IN) :: elem, nd
+  REAL(kind=dp), INTENT(IN) :: refbasis(nd), sourcecoeff, detg, ip
+!------------------------------------------------------------------------------
+  INTEGER :: i
+
+  do i = 1, nd
+      forces(elem,i) = forces(elem,i) + refbasis(i)*sourcecoeff*detg*ip
+  end do
+
+END SUBROUTINE AccumulateForce
 
 !------------------------------------------------------------------------------
 SUBROUTINE get_crs_inds(val_inds, rows, cols, l2g, nd, elem)
@@ -339,12 +351,14 @@ SUBROUTINE loop_over_active_2(active, elemdofs, max_nd, x, y, z, dim, refbasis, 
   
   real(kind=dp) :: stiffs(active, max_nd*max_nd), forces(active,max_nd)
   integer :: val_inds(active, max_nd*max_nd)
-  integer :: elem, n, nd, nb, i, j 
+  integer :: elem, n, nd, nb, i, j, ndsq
 
   
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG START ==='
 
-  !$omp target data map(from: stiffs(:,:), val_inds(:,:), forces(:,:))
+  ndsq = max_nd*max_nd
+
+  !$omp target data map(from: stiffs(1:active,1:ndsq), val_inds(1:active,1:ndsq), forces(1:active,1:max_nd))
   !$omp target 
   !$omp teams distribute parallel do
     do elem=1, active
@@ -362,7 +376,7 @@ SUBROUTINE loop_over_active_2(active, elemdofs, max_nd, x, y, z, dim, refbasis, 
       n=elemdofs(elem,1)
       nd=elemdofs(elem,2)
       nb=elemdofs(elem,3)
-      call get_crs_inds(val_inds, rows, cols, l2g, nd+nb, elem)
+      call get_crs_inds(val_inds, rows, cols, l2g, nd, elem)
     end do
   !$omp end teams distribute parallel do
   !$omp end target
@@ -374,8 +388,8 @@ SUBROUTINE loop_over_active_2(active, elemdofs, max_nd, x, y, z, dim, refbasis, 
   do elem=1, active
     n=elemdofs(elem,1)
     nd=elemdofs(elem,2)
-    nb=elemdofs(elem,3)
-      call AccumulateStiff(n, nd+nb, nb, &
+    !nb=elemdofs(elem,3)
+      call AccumulateStiff(n, nd, &
       x, &
       y, &
       z, &
