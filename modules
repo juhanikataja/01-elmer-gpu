@@ -1,6 +1,6 @@
 #!/bin/bash
 export HSA_XNACK=1
-module purge                                                                                                                                                                                                    
+#module purge                                                                                                                                                                                                    
 module load LUMI/23.09                                                                                                                                                                                          
 module load partition/G                                                                                                                                                                                         
 module load PrgEnv-cray                                                                                                                                                                                         
