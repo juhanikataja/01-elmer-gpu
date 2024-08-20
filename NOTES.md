@@ -33,3 +33,7 @@
   - [o] mpi rank per gpu ? 
   - Rocalution: CSR col-pointer pitää olla järjestetty (nouseva)
   - `void rocalution::LocalMatrix::MultiColoring(int &num_colors, int **size_colors, LocalVector<int> *permutation) const`
+
+# 2024-08-20
+
+- [ ] Write a README.md file for hackathon
