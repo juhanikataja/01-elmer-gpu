@@ -3,144 +3,6 @@ module LocalMV
 CONTAINS
 !#ifdef BUILDLOCALMV
 
-! This subroutine will accumulate "stiffs" array from integration weights in parts
-SUBROUTINE AccumulateStiff( n, nd, x, y, z, dim, refbasis, refdBasisdx, & 
-    ip, elem, stiffs, forces)
-!------------------------------------------------------------------------------
-    !USE LinearForms
-    use types, only: dp
-    !use iso_c_binding
-#ifdef ASSEMBLE
-    use DefUtils ! TODO: defaultupdateequations is here but defutils may not be used due to threadprivate module variables if
-                 ! declare target is set
-#endif
-    IMPLICIT NONE
-!$omp declare target
-
-    INTEGER, INTENT(IN) :: n, nd
-    real(kind=dp), intent(in) :: x(:,:), y(:,:), z(:,:)
-    INTEGER, intent(in) :: dim, elem
-    real(kind=dp), intent(in) :: refbasis(:), refdbasisdx(:,:), ip
-    real(kind=dp), intent(inout) :: stiffs(:,:), forces(:,:)
-!------------------------------------------------------------------------------
-#define ngp_ 4
-#define nd_ 4
-    REAL(KIND=dp) :: Basis(nd)
-    real(kind=dp) :: dBasisdx(nd,3)
-    !REAL(KIND=dp) :: MASS(nd,nd), 
-    REAL(KIND=dp) :: STIFF(nd,nd), FORCE(nd)
-    REAL(KIND=dp) :: DiffCoeff, SourceCoeff
-    REAL(KIND=dp) :: LtoGMap(3,3), detg
-    INTEGER :: j,k,m,i,l,t,p,q,allocstat
-    integer :: colind
-    
-#ifdef DEBUGPRINT
-    INTEGER :: round = 1 ! TODO
-#endif
-
-!------------------------------------------------------------------------------
-
-    
-    !dim = CoordinateSystemDimension()
-
-
-!#ifdef DOIT
-
-    dbasisdx(:,:) = 0_dp
-#if 1
-    !LtoGMap(:,:) = 1_dp
-    !detg = 1.0_dp
-      
-      ! TODO: testing effect of commenting this out
-      call myElementMetric(nd,n,x,y,z, dim, DetG, refdbasisdx(:,:), LtoGMap, elem)
-
-      ! detj(l) = detg ! When using array of integration points
-
-      do k=1,dim
-        do j=1,dim
-          do m = 1,nd
-            dbasisdx(m,j) = dbasisdx(m,j) + refdbasisdx(m,k)*LtoGMap(j,k)
-          end do 
-        end do
-      end do
-#endif
-    ! end do
-
-
-
-    ! PART ONE: Collect local stiffness to STIFF using experimental method
-
-    ! DO t=1,ngp
-    !   DetJ(t) = IP % s(t) * Detj(t)
-    ! END DO
-
-
-    !MASS  = 0._dp
-    STIFF = 0._dp
-    DiffCoeff = 1._dp ! TODO: Material parameters must be communicated somehow to the solver
-#if 0
-    do k = 1, dim
-      do j= 1, nd
-        do i = 1, nd
-          !do l = 1,ngp
-          !   stiff(i,j) = stiff(i,j) + dbasisdx(l,i,k)*dbasisdx(l,j,k)*diffcoeff(l)*detJ(l)*ip
-          !end do
-
-          stiff(i,j) = stiff(i,j) + dbasisdx(i,k)*dbasisdx(j,k)
-
-          ! stiffs(elem,(i-1)*nd+j) = stiff(i,j)
-          !stiffs(elem,(i-1)*nd+j) = stiffs(elem,(i-1)*nd+j) + dbasisdx(i,k)*dbasisdx(j,k)*diffcoeff*detg*ip
-        end do
-      end do
-    end do
-#endif
-
-#if 0
-    diffcoeff = diffcoeff*detg*ip
-    do j = 1, nd
-      k = (j-1)*nd
-      do i = 1, nd
-        stiffs(elem,k+i) = stiffs(elem, k+i) + diffcoeff*stiff(i,j)
-      end do 
-    end do
-#endif
-
-
-#if 1
-FORCE = 1._dp
-sourcecoeff = 1._dp
-    do i = 1, nd
-      !do l = 1, ngp
-        ! force(i) = force(i) + refbasis(l)*sourcecoeff(l)*detJ(l)*ip
-      !end do
-      ! forces(elem,i) = force(i) ! TODO: add forces
-      forces(elem,i) = forces(elem,i) + refbasis(i)*sourcecoeff*detg*ip + dbasisdx(i,1)
-    end do
-#endif
-
-!------------------------------------------------------------------------------
-END SUBROUTINE AccumulateStiff
-!------------------------------------------------------------------------------
-
-!------------------------------------------------------------------------------
-SUBROUTINE AccumulateForce(forces, elem, nd, refbasis, sourcecoeff, detg, ip)
-!------------------------------------------------------------------------------
-  use types, only: dp
-  IMPLICIT NONE 
-  !$omp declare target
-!------------------------------------------------------------------------------
-  REAL(kind=dp), INTENT(OUT) :: forces(:,:)
-  INTEGER, INTENT(IN) :: elem, nd
-  REAL(kind=dp), INTENT(IN) :: refbasis(nd), sourcecoeff, detg, ip
-!------------------------------------------------------------------------------
-  INTEGER :: i
-
-  do i = 1, nd
-      forces(elem,i) = forces(elem,i) + refbasis(i)*sourcecoeff*detg*ip
-  end do
-
-END SUBROUTINE AccumulateForce
-
 !------------------------------------------------------------------------------
 SUBROUTINE get_crs_inds(val_inds, rows, cols, l2g, nd, elem)
     IMPLICIT NONE
@@ -162,7 +24,9 @@ SUBROUTINE get_crs_inds(val_inds, rows, cols, l2g, nd, elem)
     end do
 
 END SUBROUTINE get_crs_inds
+!------------------------------------------------------------------------------
 
+!------------------------------------------------------------------------------
 SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, & 
     ip, ngp, elem, l2g, values, cols, rows, rhs, stiffs, forces, val_inds)
 !------------------------------------------------------------------------------
@@ -307,6 +171,10 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
 #ifdef DEBUGPRINT
     if (round<3) print *, l2g(elem, :)
 #endif
+#if 0
+    call get_crs_inds(val_inds, rows, cols, l2g, nd, elem)
+#endif
+#if 1
     do i = 1,nd
       do j = 1,nd
         colind = 0
@@ -324,111 +192,11 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
       end do
       !rhs(l2g(elem,i)) = rhs(l2g(elem,i)) + force(i)
     end do
+#endif
 
 !------------------------------------------------------------------------------
 END SUBROUTINE ModuleLocalMatrixVecSO
 
-
-SUBROUTINE loop_over_active_2(active, elemdofs, max_nd, x, y, z, dim, refbasis, refdBasisdx, &
-    refip, ngp, l2g, values, cols, rows, rhs)
-
-  use Types, only: dp
-  USE Integration, only: GaussIntegrationPoints_t
-  USE ISO_FORTRAN_ENV, ONLY : ERROR_UNIT 
-
-  implicit none
-
-  integer, intent(in) :: active, elemdofs(:,:), ngp, dim, &
-    l2g(:,:), cols(:), rows(:), max_nd
-
-  real(kind=dp), intent(in) :: x(:,:), y(:,:), z(:,:), &
-    refBasis(:,:), refdBasisdx(:,:,:)
-
-  real(kind=dp), intent(inout) :: values(:), rhs(:)
-
-  type(GaussIntegrationPoints_t), intent(in) :: refip
-
-  
-  real(kind=dp) :: stiffs(active, max_nd*max_nd), forces(active,max_nd)
-  integer :: val_inds(active, max_nd*max_nd)
-  integer :: elem, n, nd, nb, i, j, ndsq
-
-  
-  write(ERROR_UNIT,'(A)') '=== TARGET DEBUG START ==='
-
-  ndsq = max_nd*max_nd
-
-  !$omp target data map(from: stiffs(1:active,1:ndsq), val_inds(1:active,1:ndsq), forces(1:active,1:max_nd))
-  !$omp target 
-  !$omp teams distribute parallel do
-    do elem=1, active
-      stiffs(elem,:) = 0_dp
-      forces(elem,:) = 0_dp
-    end do
-  !$omp end teams distribute parallel do
-  !$omp end target
-
-  write(ERROR_UNIT,'(A)') '=== TARGET INIT 1 ==='
-
-  !$omp target 
-  !$omp teams distribute parallel do
-    do elem=1, active
-      n=elemdofs(elem,1)
-      nd=elemdofs(elem,2)
-      nb=elemdofs(elem,3)
-      call get_crs_inds(val_inds, rows, cols, l2g, nd, elem)
-    end do
-  !$omp end teams distribute parallel do
-  !$omp end target
-
-  write(ERROR_UNIT,'(A)') '=== TARGET INIT 2 ==='
-
-  !$omp target
-  !$omp teams distribute parallel do 
-  do elem=1, active
-    n=elemdofs(elem,1)
-    nd=elemdofs(elem,2)
-    !nb=elemdofs(elem,3)
-      call AccumulateStiff(n, nd, &
-      x, &
-      y, &
-      z, &
-      dim, &
-      refbasis(:,1), refdBasisdx(:,:,1), refip%s(1), elem, &
-      stiffs, forces) ! Here be stiffs and inds
-  end do
-  !$omp end teams distribute parallel do
-  !$omp end target
-
-  !$omp end target data
-  write(ERROR_UNIT,'(A)') '=== TARGET DEBUG END ==='
-
-#if 0
-  !No data races due to coloring
-  nd = max_nd ! TODO: masking!
-    !nd=elemdofs(elem,2)
-    do i=1, nd
-      do j = 1, nd
-!$omp parallel do
-        do elem=1, active
-          associate(colind => val_inds(elem, (i-1)*nd+j) )
-            values(colind) = values(colind) + stiffs(elem, (i-1)*nd+j)
-          end associate
-        end do
-!$omp end parallel do
-      end do
-
-      !$omp parallel do
-      do elem=1, active
-        rhs(l2g(elem, i)) = rhs(l2g(elem, i)) + forces(elem, i)
-      end do
-      !$omp end parallel do
-    end do
-#endif
-
-END SUBROUTINE loop_over_active_2
-
-    
 SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, refdBasisdx, &
     refip, ngp, l2g, values, cols, rows, rhs)
 
@@ -846,8 +614,8 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   nColours = GetNOFColours(Solver)
   !!$OMP PARALLEL &
   !!$OMP SHARED(Active, Solver, nColours, VecAsm, elem_lists) &
-  !!$OMP PRIVATE(t, Element, n, nd, nb, col, InitHandles) & 
-  !!$OMP REDUCTION(max:MaxNumNodes) DEFAULT(none)
+  !!$OMP PRIVATE(t, n, nd, nb, col, InitHandles, element, nodes, indexes) & 
+  !!$OMP REDUCTION(max:MaxNumNodes,MaxNumDOFs) REDUCTION(min:MinNumNodes) DEFAULT(none)
   do col=1,ncolours
     !!$OMP SINGLE
     !!$omp target enter data map(to:elem_lists(col)) nowait
@@ -857,27 +625,22 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   MaxNumDOFs = 0
     !!$OMP END SINGLE
 
-    !!$OMP DO
     do state=1,2
+      !!$OMP DO
       do t=1,active
         Element => GetActiveElement(t)
-        CALL GetElementNodesVec( nodes,  Element)
+
         if (state == 1) then
-          !elem_lists(col) % elemdofs(t) % p => Element
-          ! elem_lists(col) % elemdofs(t) % n = GetElementNOFNodes(Element)
-          ! elem_lists(col) % elemdofs(t) % nd = GetElementNOFDOFs(Element)
-          ! elem_lists(col) % elemdofs(t) % nb = GetElementNOFBDOFs(Element)
 
-          elem_lists(col) % elemdofs(t,1) = GetElementNOFNodes(Element)
-          elem_lists(col) % elemdofs(t,2) = GetElementNOFDOFs(Element)
-          elem_lists(col) % elemdofs(t,3) = GetElementNOFBDOFs(Element)
-
-          ! CALL GetElementNodesVec( elem_lists(col) % elemdofs(t) % nodes,  elem_lists(col) % elemdofs(t) % p)
+          elem_lists(col) % elemdofs(t,1) = GetElementNOFNodes(Element)  ! "n"
+          elem_lists(col) % elemdofs(t,2) = GetElementNOFDOFs(Element)   ! "nd"
+          elem_lists(col) % elemdofs(t,3) = GetElementNOFBDOFs(Element)  ! "nb"
 
           MaxNumNodes = max(MaxNumNodes, elem_lists(col) % elemdofs(t,1))
           MinNumNodes = min(MinNumNodes, elem_lists(col) % elemdofs(t,1))
           MaxNumDOFs = max(MaxNumDOFs, elem_lists(col) % elemdofs(t, 2))
         else
+        CALL GetElementNodesVec( nodes, Element)
 
           associate (n => elem_lists(col) % elemdofs(t,1), nd => elem_lists(col) % elemdofs(t,2))
             elem_lists(col) % x(t,1:n) = nodes % x(1:n)
@@ -889,7 +652,9 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
           end associate
         end if
       end do
+      !!$OMP END DO
 
+      !!$OMP SINGLE
       if (state == 1) then
         allocate( elem_lists(col) % x(active, MaxNumNodes), &
                   elem_lists(col) % y(active, MaxNumNodes), &
@@ -903,9 +668,10 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
         allocate(elem_lists(col) % l2g(active, MaxNumDOFs))
       end if
+      !!$OMP END SINGLE
+      !!$OMP BARRIER
     end do
 
-  !!$OMP END DO
   end do
   !!$OMP END PARALLEL
 
@@ -978,7 +744,8 @@ global_stiff % values(:) = 0_dp
 #endif
 
     active = size(elem_lists(col) % elemdofs, 1)
-  call loop_over_active_2(active, elem_lists(col) % elemdofs, MaxNumDOFs, &
+
+    call loop_over_active(active, elem_lists(col) % elemdofs, MaxNumDOFs, &
     elem_lists(col) % x, &
     elem_lists(col) % y, &
     elem_lists(col) % z, &
@@ -1014,15 +781,15 @@ write (*, '(A, I4, A, F8.6, I9, E12.3)') 'Color ', col, ' time, #elems, quotient
   CALL DefaultFinishBulkAssembly()
 #if 0
   open(newunit=t, file="cols.csv")
-  write(t, '(I5)') global_stiff % cols
+  write(t, '(I5)') solver % matrix % cols
   close(t)
 
   open(newunit=t, file="rows.csv")
-  write(t, '(I5)') global_stiff % rows
+  write(t, '(I5)') solver % matrix % rows
   close(t)
 
   open(newunit=t, file="values.csv")
-  write(t, '(F9.4)') global_stiff % values
+  write(t, '(F9.4)') solver % matrix % values
   close(t)
 #endif
    !STOP

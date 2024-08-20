@@ -1,2 +1,2 @@
 gmsh -3 -clscale 6 winkel.geo -o winkel.msh
-ElmerGrid 14 2 winkel.msh -autoclean  -increase
+ElmerGrid 14 2 winkel.msh -autoclean -increase

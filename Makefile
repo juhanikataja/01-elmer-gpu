@@ -18,19 +18,19 @@ interactive:
 	srun -t 00:15:00 -J cheese_test -p dev-g -A project_462000007 -N 1 -n 1 -G 1 bash
 
 buildlumi:
-	ELMERSOLVER_LINK_LIBRARY=-lelmersolverstatic elmerf90 -O3 Poisson.F90 -o Poisson.so -DBUILDLOCALMV 
+	elmerf90 -O3 Poisson.F90 -o Poisson.so -DBUILDLOCALMV 
 
 buildprof:
-	ELMERSOLVER_LINK_LIBRARY=-lelmersolverstatic elmerf90 -O3 Poisson.F90 -o Poisson.so -DBUILDLOCALMV -DPROFILING
+	elmerf90 -O3 Poisson.F90 -o Poisson.so -DBUILDLOCALMV -DPROFILING
 
 buildwasms:
-	ELMERSOLVER_LINK_LIBRARY=-lelmersolverstatic elmerf90 -O3 Poisson.F90 -o Poisson.so -DBUILDLOCALMV -DPROFILING -hkeepfiles
+	elmerf90 -O3 Poisson.F90 -o Poisson.so -DBUILDLOCALMV -DPROFILING -hkeepfiles
 
 buildcpuprof: 
-	ELMERSOLVER_LINK_LIBRARY=-lelmersolverstatic elmerf90 -O3 Poisson.F90 -o Poisson.so -DBUILDLOCALMV -DNOGPU -DPROFILING
+	elmerf90 -O3 Poisson.F90 -o Poisson.so -DBUILDLOCALMV -DNOGPU -DPROFILING
 
 buildcpu: 
-	ELMERSOLVER_LINK_LIBRARY=-lelmersolverstatic elmerf90 -O3 Poisson.F90 -o Poisson.so -DBUILDLOCALMV -DNOGPU
+	elmerf90 -g -O1 Poisson.F90 -o Poisson.so -DBUILDLOCALMV -DNOGPU
 
 tailout: 
 	watch -n 2 tail -n 25 `ls *.out|tail -n 1`
