@@ -33,10 +33,10 @@ buildcpu:
 	ELMERSOLVER_LINK_LIBRARY=-lelmersolverstatic elmerf90 -O3 Poisson.F90 -o Poisson.so -DBUILDLOCALMV -DNOGPU
 
 tailout: 
-	tail -f `ls *.out|tail -n 1`
+	watch -n 2 tail -n 25 `ls *.out|tail -n 1`
 
 tailerr:
-	tail -f `ls *.err|tail -n 1`
+	watch -n 2 tail -n 25 `ls *.err|tail -n 1`
 
 lessout:
 	less `ls *.out|tail -n 1`
