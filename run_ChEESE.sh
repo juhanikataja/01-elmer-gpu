@@ -48,18 +48,19 @@ export LIBOMPTARGET_KERNEL_TRACE=2
 
 
 ###### enable CSC provided modules #########
-ml use /appl/local/csc/modulefiles
-module use ~/.modulefiles
+#ml use /appl/local/csc/modulefiles
+#module use ~/.modulefiles
 
-ml LUMI/23.09
-ml PrgEnv-cray
-ml craype-accel-amd-gfx90a
-ml rocm
-ml cray-libsci
-ml cray-hdf5/1.12.2.7
-ml cray-netcdf/4.9.0.7
-
-ml myelmer/offload
+#ml LUMI/23.09
+#ml PrgEnv-cray
+#ml craype-accel-amd-gfx90a
+#ml rocm
+#ml cray-libsci
+#ml cray-hdf5/1.12.2.7
+#ml cray-netcdf/4.9.0.7
+source ../cpe/setenv.sh
+#ml myelmer/offload
+ml 
 
 # this loads the spack-PrgEnv-gnu cray-libsci (BLAS, LAPACK) version
 ###### best to use this for audits! #########
