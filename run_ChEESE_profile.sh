@@ -41,24 +41,25 @@ echo "running OpenMP on $SLURM_CPUS_PER_TASK"
 ## These control USM behaviour
 export CRAY_ACC_USE_UNIFIED_MEM=0
 export HSA_XNACK=0
-export CRAY_ACC_DEBUG=2
+export CRAY_ACC_DEBUG=0
 
 # This is some profiling thingy
-export LD_PRELOAD=./libpreload-me.so
+# export LD_PRELOAD=./libpreload-me.so
 
 ###### enable CSC provided modules #########
-ml use /appl/local/csc/modulefiles
-module use ~/.modulefiles
+# ml use /appl/local/csc/modulefiles
+# module use ~/.modulefiles
 
-ml LUMI/23.09
-ml PrgEnv-cray
-ml craype-accel-amd-gfx90a
-ml rocm
-ml cray-libsci
-ml cray-hdf5/1.12.2.7
-ml cray-netcdf/4.9.0.7
+# ml LUMI/23.09
+# ml PrgEnv-cray
+# ml craype-accel-amd-gfx90a
+# ml rocm
+# ml cray-libsci
+# ml cray-hdf5/1.12.2.7
+# ml cray-netcdf/4.9.0.7
 
-ml myelmer/offload
+# ml myelmer/offload
+ml
 
 # this loads the spack-PrgEnv-gnu cray-libsci (BLAS, LAPACK) version
 ###### best to use this for audits! #########
