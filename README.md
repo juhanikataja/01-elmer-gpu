@@ -4,15 +4,19 @@ Poisson OpenMP offload code for Elmer LUMI hackathon
 ## Introduction
 
 This is a janky work in progress piece of code that has been functional on
-cce/16+rocm/5.x.
+cce/16+rocm/5.4.6.
 
 ## Running
 
+- Load modules listed in `modules_run`
 - Have elmer installation set up (`PATH` variable, and `ELMER_HOME` variable possibly).
 - Look at `run_ChEESE.sh` and `run_ChEESE_profile.sh`. (TODO: rename these so
   they are easier to write on keyboard).
 
 ## Compiling
+
+
+- Load modules listed in `modules_compile`
 
 There are useful some targets in `Makefile`. Most notably
 
@@ -29,7 +33,6 @@ buildcpu:
 
 Here `NOGPU` is important for cpu builds. Defining it disables some `target
 enter data` directives.
-
 
 
 ## Meshing
