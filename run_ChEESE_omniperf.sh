@@ -72,8 +72,9 @@ ml
 #module load elmer/gcc-cray
 ###### make it so! ######### 
 ##
-
+ELMER_CMD=/scratch/project_462000007/juhanika/elmer_tmp/install/devel-vitali/bin/ElmerSolver_mpi
 #srun rocprof --stats --sys-trace -i trace_profile.txt ElmerSolver case.sif
 srun rocminfo
-srun rocprof --stats -i trace_profile.txt ElmerSolver case.sif
-srun rocprof --stats --sys-trace --hip-trace ElmerSolver case.sif
+#srun rocprof --stats -i trace_profile.txt ElmerSolver case.sif
+#srun rocprof --stats --sys-trace --hip-trace ElmerSolver case.sif
+srun omniperf profile -n poisson_omniperf -- $ELMER_CMD case.sif

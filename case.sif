@@ -23,7 +23,7 @@ Simulation
   Output Level = 20
 
   Simulation Timing = Logical True
-  Post File = "case_fixedparams.vtu"
+!  Post File = "case_fixedparams.vtu"
 End
 
 
@@ -83,7 +83,8 @@ Solver 1
   Linear System Abort Not Converged = True
   Linear System Residual Output = 20
   Linear System Precondition Recompute = 1
-  
+  Linear System Use Rocalution = LOGICAL false
+ 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 End

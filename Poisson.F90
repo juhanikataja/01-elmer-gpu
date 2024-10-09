@@ -225,7 +225,7 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG START ==='
   !$omp target data map(from: stiffs(:,:), val_inds(:,:))
   !$omp target 
-  !$omp teams distribute parallel do 
+  !$omp teams distribute parallel do simd
   do elem=1, active
     n=elemdofs(elem,1)
     nd=elemdofs(elem,2)
@@ -238,7 +238,7 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
                                 refbasis, refdBasisdx, refip, ngp, elem, &
                                 l2g, values, cols, rows, rhs, stiffs, forces, val_inds) ! Here be stiffs and inds
   end do
-  !$omp end teams distribute parallel do
+  !$omp end teams distribute parallel do simd
   !$omp end target
   !$omp end target data
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG END ==='
