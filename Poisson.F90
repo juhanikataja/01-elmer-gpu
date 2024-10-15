@@ -93,12 +93,12 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
       call myElementMetric(nd,n,x,y,z, dim, DetG, refdbasisdx(:,:,l), LtoGMap, elem)
       ! call myElementMetric(nd,n,x,y,z, dim, Metric, DetG, dLBasisdx, LtoGMap, elem)
 
-      detj(l) = detg
+      detj(l) = detg ! n_elems x ngp
 
       do m = 1,nd
         do j=1,dim
           do k=1,dim
-            dbasisdx(l,m,j) = dbasisdx(l,m,j) + refdbasisdx(m,k,l)*LtoGMap(j,k)
+            dbasisdx(l,m,j) = dbasisdx(l,m,j) + refdbasisdx(m,k,l)*LtoGMap(j,k) ! n_elems x (ngp * 3 * 3)
             ! dbasisdx(l,m,j) = dbasisdx(l,m,j) + dLBasisdx(m,k)*LtoGMap(j,k)
           end do 
         end do
@@ -116,9 +116,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
 
     !MASS  = 0._dp
     STIFF = 0._dp
-    FORCE = 0._dp
     DiffCoeff = 1._dp ! TODO: Material parameters must be communicated somehow to the solver
-    sourcecoeff = 1._dp
 #if 1
     do j=1,nd
       do i = 1,nd
@@ -131,6 +129,8 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
       end do
     end do
 
+    sourcecoeff = 1._dp
+    FORCE = 0._dp
     do i = 1,nd
       do l = 1, ngp
         force(i) = force(i) + refbasis(l,i)*sourcecoeff(l)*detJ(l)*ip%s(l)
@@ -198,11 +198,12 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
 END SUBROUTINE ModuleLocalMatrixVecSO
 
 SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, refdBasisdx, &
-    refip, ngp, l2g, values, cols, rows, rhs)
+    refip, ngp, l2g, values, cols, rows, rhs, timing)
 
   use Types, only: dp
   USE Integration, only: GaussIntegrationPoints_t
   USE ISO_FORTRAN_ENV, ONLY : ERROR_UNIT 
+  use omp_lib
 
   implicit none
 
@@ -220,12 +221,24 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
   real(kind=dp) :: stiffs(active, max_nd*max_nd), forces(active,max_nd)
   integer :: val_inds(active, max_nd*max_nd)
   integer :: elem, n, nd, nb, i, j 
+  real(kind=dp), intent(out) :: timing
 
   
+! #ifdef NOGPU
+!     timing = CPUTime()
+! #endif
+
+! #ifndef NOGPU
+    timing = omp_get_wtime() 
+! #endif
+
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG START ==='
-  !$omp target data map(from: stiffs(:,:), val_inds(:,:))
-  !$omp target 
-  !$omp teams distribute parallel do simd
+  !$omp target data map(from: stiffs(:,:), val_inds(:,:), forces(:,:))
+#ifndef NOGPU
+  !$omp target teams distribute parallel do simd num_teams(220) thread_limit(128)
+#else
+!$omp parallel do simd
+#endif
   do elem=1, active
     n=elemdofs(elem,1)
     nd=elemdofs(elem,2)
@@ -237,31 +250,44 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
                                 dim, &
                                 refbasis, refdBasisdx, refip, ngp, elem, &
                                 l2g, values, cols, rows, rhs, stiffs, forces, val_inds) ! Here be stiffs and inds
+
   end do
-  !$omp end teams distribute parallel do simd
-  !$omp end target
+#ifndef NOGPU
+  !$omp end target teams distribute parallel do simd
+#else
+  !$omp end parallel do simd
+#endif
   !$omp end target data
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG END ==='
+
+! #ifdef NOGPU
+!     timing = CPUTime() - timing
+! #endif
+
+! #ifndef NOGPU
+    timing = omp_get_wtime() - timing
+! #endif
+
 
   !No data races due to coloring
   nd = max_nd ! TODO: masking!
     !nd=elemdofs(elem,2)
     do i=1, nd
       do j = 1, nd
-!$omp parallel do
+!$omp parallel do simd
         do elem=1, active
           associate(colind => val_inds(elem, (i-1)*nd+j) )
             values(colind) = values(colind) + stiffs(elem, (i-1)*nd+j)
           end associate
         end do
-!$omp end parallel do
+!$omp end parallel do simd
       end do
 
-      !$omp parallel do
+      !$omp parallel do simd
       do elem=1, active
         rhs(l2g(elem, i)) = rhs(l2g(elem, i)) + forces(elem, i)
       end do
-      !$omp end parallel do
+      !$omp end parallel do simd
     end do
 
 END SUBROUTINE loop_over_active
@@ -508,7 +534,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 ! Local variables
 !------------------------------------------------------------------------------
   TYPE(Element_t), POINTER :: Element
-  REAL(KIND=dp) :: Norm
+  REAL(KIND=dp) :: Norm, timing
   INTEGER :: n, nb, nd, t, active
   INTEGER :: iter, maxiter, nColours, col, totelem, nthr, state, MaxNumNodes, MinNumNodes, MaxNumDOFs
   INTEGER :: ngp, i, dim, coorddim, k
@@ -715,7 +741,7 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   CALL ResetTimer( Caller//'BulkAssembly' )
 #ifndef NOGPU
 
-!$omp target enter data map(to:elem_lists, elem_lists(1:ncolours), refbasis, prefdBasisdx, trefbasis(:,:))
+!$omp target enter data map(to: elem_lists, elem_lists(1:ncolours), refbasis, prefdBasisdx, trefbasis(:,:))
 !$omp target enter data map(to: refbasis(1:ngp,1:nd), prefdBasisdx(1:nd,1:3,1:ngp)) 
 !$omp target enter data map(to: refip%u(1:ngp), refip%v(1:ngp), refip%w(1:ngp), refip, refip%u, refip%v, refip%w, refip%s) 
 !$omp target enter data map(to: refip%s(1:ngp))
@@ -733,15 +759,9 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 
 #endif
 global_stiff % values(:) = 0_dp
+
   DO col=1,nColours
 
-#ifdef NOGPU
-    color_timing(col) = CPUTime()
-#endif
-
-#ifndef NOGPU
-    color_timing(col) = omp_get_wtime() 
-#endif
 
     active = size(elem_lists(col) % elemdofs, 1)
 
@@ -750,31 +770,19 @@ global_stiff % values(:) = 0_dp
     elem_lists(col) % y, &
     elem_lists(col) % z, &
     dim, trefBasis, prefdBasisdx,refip, ngp, elem_lists(col) % l2g, &
-    global_stiff % values, global_stiff % cols, global_stiff % rows, global_stiff % rhs)
+    global_stiff % values, global_stiff % cols, global_stiff % rows, &
+    global_stiff % rhs, timing)
 
-#ifdef NOGPU
-    color_timing(col) = CPUTime() - color_timing(col)
-#endif
+  color_timing(col) = timing
 
-#ifndef NOGPU
-    color_timing(col) = omp_get_wtime() - color_timing(col)
-#endif
-
-write (*, '(A, I4, A, F8.6, I9, E12.3)') 'Color ', col, ' time, #elems, quotient: ', &
-  color_timing(col), size(elem_lists(col) % elemdofs, 1), color_timing(col)/size(elem_lists(col) % elemdofs, 1)
+  write (*, '(A, I4, A, F8.6, I9, E12.3)') 'Color ', col, ' time, #elems, quotient: ', &
+    color_timing(col), size(elem_lists(col) % elemdofs, 1), color_timing(col)/size(elem_lists(col) % elemdofs, 1)
 
   END DO
 ! call cray_acc_set_debug_global_level(0)
-#ifndef NOGPU
-!do col = 1,nColours
-   !write (*, '(A, I4, A, F8.6, I9, E12.3)') 'Color ', col, ' time, #elems, quotient: ', &
-     !color_timing(col), size(elem_lists(col) % elemdofs, 2), color_timing(col)/size(elem_lists(col) % elemdofs, 2)
- !end do
-#endif
 
 
-
-    CALL CheckTimer(Caller//'BulkAssembly',Delete=.TRUE.)
+CALL CheckTimer(Caller//'BulkAssembly',Delete=.TRUE.)
   !stop
   totelem = 0
 
