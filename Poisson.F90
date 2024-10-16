@@ -28,7 +28,7 @@ END SUBROUTINE get_crs_inds
 
 !------------------------------------------------------------------------------
 SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisdx, & 
-    ip, ngp, elem, l2g, values, cols, rows, rhs, stiffs, forces, val_inds)
+    ip, ngp, elem, l2g, values, cols, rows, rhs) !, stiffs, forces, val_inds)
 !------------------------------------------------------------------------------
     !USE LinearForms
     use types, only: dp
@@ -48,9 +48,9 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
     real(kind=dp), intent(in) :: refbasis(:,:), refdbasisdx(:,:,:)
     TYPE(GaussIntegrationPoints_t), intent(in) :: IP
     integer, intent(in) :: cols(:), rows(:)
-    integer, intent(out) :: val_inds(:,:)
+    ! integer, intent(out) :: val_inds(:,:)
     real(kind=dp), intent(inout) :: values(:), rhs(:)
-    real(kind=dp), intent(inout) :: stiffs(:,:), forces(:,:)
+    ! real(kind=dp), intent(inout) :: stiffs(:,:), forces(:,:)
 !------------------------------------------------------------------------------
 #define ngp_ 4
 #define nd_ 4
@@ -124,7 +124,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
           do l = 1,ngp
             stiff(i,j) = stiff(i,j) + dbasisdx(l,i,k)*dbasisdx(l,j,k)*diffcoeff(l)*detJ(l)*ip%s(l)
           end do
-          stiffs(elem,(i-1)*nd+j) = stiff(i,j)
+          !stiffs(elem,(i-1)*nd+j) = stiff(i,j)
         end do
       end do
     end do
@@ -135,7 +135,7 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
       do l = 1, ngp
         force(i) = force(i) + refbasis(l,i)*sourcecoeff(l)*detJ(l)*ip%s(l)
       end do
-      forces(elem,i) = force(i) ! TODO: add forces
+      !forces(elem,i) = force(i) ! TODO: add forces
     end do
 #endif
 
@@ -145,7 +145,6 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
 #endif 
 
 #ifdef DEBUGPRINT
-
   if (round < 3) then
     print *, 'stiff' , round
     DO t=1,nd 
@@ -159,8 +158,8 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
     round = round + 1
   end if
 #endif
- 
-    
+
+
 #ifdef ASSEMBLE
     ! DEBUG
     !IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE,UElement=Element)
@@ -187,10 +186,10 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
           print *, colind, stiff(i,j), l2g(elem,i), l2g(elem,j)
         end if
 #endif
-        !values(colind) = values(colind) + stiff(i,j)
-        val_inds(elem,(i-1)*nd+j) = colind
+        values(colind) = values(colind) + stiff(i,j)
+        ! val_inds(elem,(i-1)*nd+j) = colind
       end do
-      !rhs(l2g(elem,i)) = rhs(l2g(elem,i)) + force(i)
+      rhs(l2g(elem,i)) = rhs(l2g(elem,i)) + force(i)
     end do
 #endif
 
@@ -233,9 +232,9 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
 ! #endif
 
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG START ==='
-  !$omp target data map(from: stiffs(:,:), val_inds(:,:), forces(:,:))
+  !!$omp target data map(from: stiffs(:,:), val_inds(:,:), forces(:,:))
 #ifndef NOGPU
-  !$omp target teams distribute parallel do simd num_teams(220) thread_limit(128)
+  !$omp target teams distribute parallel do simd num_teams(220) thread_limit(64)
 #else
 !$omp parallel do simd
 #endif
@@ -249,7 +248,7 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
                                 z, &
                                 dim, &
                                 refbasis, refdBasisdx, refip, ngp, elem, &
-                                l2g, values, cols, rows, rhs, stiffs, forces, val_inds) ! Here be stiffs and inds
+                                l2g, values, cols, rows, rhs)!, stiffs, forces, val_inds) ! Here be stiffs and inds
 
   end do
 #ifndef NOGPU
@@ -257,7 +256,7 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
 #else
   !$omp end parallel do simd
 #endif
-  !$omp end target data
+  !!$omp end target data
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG END ==='
 
 ! #ifdef NOGPU
@@ -271,6 +270,8 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
 
   !No data races due to coloring
   nd = max_nd ! TODO: masking!
+
+#if 0
     !nd=elemdofs(elem,2)
     do i=1, nd
       do j = 1, nd
@@ -289,6 +290,7 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
       end do
       !$omp end parallel do simd
     end do
+#endif
 
 END SUBROUTINE loop_over_active
 
@@ -587,9 +589,6 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
     call fatal('AdvDiffSolver', 'stiffness matrix is not CRS matrix')
   end if
 
-#ifndef NOGPU
-  !$omp target enter data map(to:global_stiff % values(:), global_stiff % rows(:), global_stiff % cols(:), global_stiff % rhs(:))
-#endif
 
 
   !$ nthr = omp_get_max_threads()
@@ -734,9 +733,6 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   end do
 
   print *, '================================================'
-#ifdef PROFILING
-  nColours = min(20, nColours)
-#endif
 
   CALL ResetTimer( Caller//'BulkAssembly' )
 #ifndef NOGPU
@@ -758,6 +754,11 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   end do
 
 #endif
+
+#ifndef NOGPU
+  !$omp target enter data map(to:global_stiff % values(:), global_stiff % rows(:), global_stiff % cols(:), global_stiff % rhs(:))
+#endif
+
 global_stiff % values(:) = 0_dp
 
   DO col=1,nColours
@@ -781,12 +782,20 @@ global_stiff % values(:) = 0_dp
   END DO
 ! call cray_acc_set_debug_global_level(0)
 
+#ifndef NOGPU
+  !$omp target exit data map(from:global_stiff % values(:), global_stiff % rows(:), global_stiff % cols(:), global_stiff % rhs(:))
+#endif
 
 CALL CheckTimer(Caller//'BulkAssembly',Delete=.TRUE.)
   !stop
   totelem = 0
 
   CALL DefaultFinishBulkAssembly()
+
+#ifdef PROFILING
+  stop
+#endif
+
 #if 0
   open(newunit=t, file="cols.csv")
   write(t, '(I5)') solver % matrix % cols
@@ -800,7 +809,6 @@ CALL CheckTimer(Caller//'BulkAssembly',Delete=.TRUE.)
   write(t, '(F9.4)') solver % matrix % values
   close(t)
 #endif
-   !STOP
 
 
   nColours = GetNOFBoundaryColours(Solver)
