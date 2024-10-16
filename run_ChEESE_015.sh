@@ -8,7 +8,7 @@
 ##
 ################################
  
-#SBATCH --time=00:20:00
+#SBATCH --time=00:15:00
 #SBATCH --job-name=ChEESE_test
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
@@ -33,33 +33,41 @@
 ## the MPI tasks
 ##########################################
 #SBATCH --cpus-per-task=56
+
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 echo "running OpenMP on $SLURM_CPUS_PER_TASK"
 #export KMP_AFFINITY=compact
 #export KMP_DETERMINISTIC_REDUCTION=yes
 
+#export CRAY_ACC_NO_ASYNC=1
+
 ## These control USM behaviour
 export CRAY_ACC_USE_UNIFIED_MEM=0
 export HSA_XNACK=0
-export CRAY_ACC_DEBUG=0
+export CRAY_ACC_DEBUG=2
+export LIBOMPTARGET_KERNEL_TRACE=2
 
-# This is some profiling thingy
-# export LD_PRELOAD=./libpreload-me.so
 
 ###### enable CSC provided modules #########
-# ml use /appl/local/csc/modulefiles
-# module use ~/.modulefiles
+#ml use /appl/local/csc/modulefiles
+#module use ~/.modulefiles
 
-# ml LUMI/23.09
-# ml PrgEnv-cray
-# ml craype-accel-amd-gfx90a
-# ml rocm
-# ml cray-libsci
-# ml cray-hdf5/1.12.2.7
-# ml cray-netcdf/4.9.0.7
+#ml LUMI/23.09
+#ml PrgEnv-cray
+#ml craype-accel-amd-gfx90a
+#ml rocm
+#ml cray-libsci
+#ml cray-hdf5/1.12.2.7
+#ml cray-netcdf/4.9.0.7
+#source ../cpe/setenv.sh
+#ml myelmer/offload
+ml 
+export LIBOMPTARGET_KERNEL_TRACE=2
+export LIBOMPTARGET_INFO=-1
 
-# ml myelmer/offload
-ml
+# setting these wont work. They need to be set in code at omp target region
+export OMP_NUM_TEAMS=220 
+export OMP_THREAD_LIMIT=64
 
 # this loads the spack-PrgEnv-gnu cray-libsci (BLAS, LAPACK) version
 ###### best to use this for audits! #########
@@ -71,14 +79,5 @@ ml
 ###### (using cray-libsci (BLAS, LAPACK)
 #module load elmer/gcc-cray
 ###### make it so! ######### 
-##
-
-#srun rocprof --stats --sys-trace -i trace_profile.txt ElmerSolver case.sif
-
-export LIBOMPTARGET_KERNEL_TRACE=2
-
-srun rocminfo
-srun rocprof --stats -i trace_profile.txt ElmerSolver case.sif
-srun rocprof --stats --sys-trace --hip-trace ElmerSolver case.sif
-#srun rocprofv2 --stats --sys-trace --hip-trace --kernel-trace --memory-copy-trace -- ElmerSolver case.sif
-# srun rocprofv2 -i trace_profile.txt --sys-trace --hip-trace --kernel-trace  ElmerSolver case.sif
+#
+srun ElmerSolver case_015.sif

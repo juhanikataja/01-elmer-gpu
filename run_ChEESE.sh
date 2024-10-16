@@ -43,7 +43,7 @@ echo "running OpenMP on $SLURM_CPUS_PER_TASK"
 ## These control USM behaviour
 export CRAY_ACC_USE_UNIFIED_MEM=0
 export HSA_XNACK=0
-export CRAY_ACC_DEBUG=0
+export CRAY_ACC_DEBUG=2
 export LIBOMPTARGET_KERNEL_TRACE=2
 
 
@@ -58,9 +58,11 @@ export LIBOMPTARGET_KERNEL_TRACE=2
 #ml cray-libsci
 #ml cray-hdf5/1.12.2.7
 #ml cray-netcdf/4.9.0.7
-source ../cpe/setenv.sh
+#source ../cpe/setenv.sh
 #ml myelmer/offload
 ml 
+export LIBOMPTARGET_KERNEL_TRACE=2
+export LIBOMPTARGET_INFO=-1
 
 # this loads the spack-PrgEnv-gnu cray-libsci (BLAS, LAPACK) version
 ###### best to use this for audits! #########
