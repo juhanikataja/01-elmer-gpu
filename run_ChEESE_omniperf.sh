@@ -59,6 +59,7 @@ export CRAY_ACC_DEBUG=2
 # ml cray-netcdf/4.9.0.7
 
 # ml myelmer/offload
+module load cray-python/3.10.10
 ml
 
 # this loads the spack-PrgEnv-gnu cray-libsci (BLAS, LAPACK) version
