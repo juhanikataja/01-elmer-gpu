@@ -8,7 +8,7 @@
 ##
 ################################
  
-#SBATCH --time=00:20:00
+#SBATCH --time=02:00:00
 #SBATCH --job-name=ChEESE_test
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
@@ -41,7 +41,7 @@ echo "running OpenMP on $SLURM_CPUS_PER_TASK"
 ## These control USM behaviour
 export CRAY_ACC_USE_UNIFIED_MEM=0
 export HSA_XNACK=0
-export CRAY_ACC_DEBUG=0
+export CRAY_ACC_DEBUG=2
 
 # This is some profiling thingy
 # export LD_PRELOAD=./libpreload-me.so
@@ -72,9 +72,16 @@ ml
 #module load elmer/gcc-cray
 ###### make it so! ######### 
 ##
+#export ROCPROF=rocprof
+
+# export OMNIPERF=/scratch/project_465001361/elmer/omniperf_2.1/libexec/omniperf/omniperf
+export PATH=$PATH:/scratch/project_465001361/elmer/omniperf_2.1/bin
+export PYTHONPATH=/pfs/lustrep2/scratch/project_465001361/elmer/python-libs:$PYTHONPATH
+export LIBOMPTARGET_KERNEL_TRACE=2
 ELMER_CMD=/scratch/project_462000007/juhanika/elmer_tmp/install/devel-vitali/bin/ElmerSolver_mpi
+
 #srun rocprof --stats --sys-trace -i trace_profile.txt ElmerSolver case.sif
 srun rocminfo
 #srun rocprof --stats -i trace_profile.txt ElmerSolver case.sif
 #srun rocprof --stats --sys-trace --hip-trace ElmerSolver case.sif
-srun omniperf profile -n poisson_omniperf -- $ELMER_CMD case.sif
+srun omniperf profile -n poisson_omniperf_015_quadratic -- $ELMER_CMD case_015.sif
