@@ -85,4 +85,6 @@ ELMER_CMD=/scratch/project_462000007/juhanika/elmer_tmp/install/devel-vitali/bin
 srun rocminfo
 #srun rocprof --stats -i trace_profile.txt ElmerSolver case.sif
 #srun rocprof --stats --sys-trace --hip-trace ElmerSolver case.sif
-srun omniperf profile -n poisson_omniperf_015_quadratic -- $ELMER_CMD case_015.sif
+
+export CASE_SOLVER_MODULE=poisson.so
+srun omniperf profile -n poisson_omniperf_015 -- $ELMER_CMD case.sif

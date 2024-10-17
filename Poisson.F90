@@ -241,7 +241,13 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG START ==='
   !!$omp target data map(from: stiffs(:,:), val_inds(:,:), forces(:,:))
 #ifndef NOGPU
-  !$omp target teams distribute parallel do simd num_teams(220) thread_limit(128)
+
+#ifdef NO_THREAD_LIMIT
+  !$omp target teams distribute parallel do simd num_teams(110)
+#else
+  !$omp target teams distribute parallel do simd num_teams(110) thread_limit(64)
+#endif
+
 #else
 !$omp parallel do simd
 #endif

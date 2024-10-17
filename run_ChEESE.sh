@@ -77,6 +77,3 @@ export LIBOMPTARGET_INFO=-1
 
 export CASE_SOLVER_MODULE=poisson.so
 srun ElmerSolver case.sif
-
-export CASE_SOLVER_MODULE=poisson_cpu.so
-srun ElmerSolver case.sif
