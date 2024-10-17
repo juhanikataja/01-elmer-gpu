@@ -77,8 +77,15 @@ ml
 
 export LIBOMPTARGET_KERNEL_TRACE=2
 
+export CASE_SOLVER_MODULE=poisson_cpu.so
 srun rocminfo
-srun rocprof --stats -i trace_profile.txt ElmerSolver case.sif
-srun rocprof --stats --sys-trace --hip-trace ElmerSolver case.sif
+# srun rocprof -d profile_cpu --stats -i trace_profile.txt ElmerSolver case.sif
+srun rocprof -d profile_cpu --stats --sys-trace --hip-trace ElmerSolver case.sif
+
 #srun rocprofv2 --stats --sys-trace --hip-trace --kernel-trace --memory-copy-trace -- ElmerSolver case.sif
 # srun rocprofv2 -i trace_profile.txt --sys-trace --hip-trace --kernel-trace  ElmerSolver case.sif
+
+# export CASE_SOLVER_MODULE=poisson.so
+# srun rocminfo
+# srun rocprof -d profile_gpu --stats -i trace_profile.txt ElmerSolver case.sif
+# srun rocprof -d profile_gpu --stats --sys-trace --hip-trace ElmerSolver case.sif

@@ -1,10 +1,14 @@
 ! This is just slightly modified version to deal with the tetrahedral mesh.
 ! The BCs are just different compared to strutural case i.e. (3,7) -> (4,8).
 
+!--LUA BEGIN
+! require("os")
+!--LUA END
+
 
 header
   CHECK KEYWORDS Warn
-  Mesh DB "." "winkel"
+  Mesh DB "." "winkel_015"
   Include Path ""
   Results Directory "results"
 End
@@ -53,7 +57,8 @@ Solver 1
 
   Variable = -dofs 1 "Temperature"
 
-  Procedure = "./Poisson.so" "AdvDiffSolver"
+  !Procedure = "./Poisson.so" "AdvDiffSolver"
+  Procedure = #os.getenv("CASE_SOLVER_MODULE")# "AdvDiffSolver"
 
   Nonlinear System Max Iterations = 1
   Nonlinear System Consistent Norm = True

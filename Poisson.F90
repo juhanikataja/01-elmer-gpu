@@ -6,7 +6,9 @@ CONTAINS
 !------------------------------------------------------------------------------
 SUBROUTINE get_crs_inds(val_inds, rows, cols, l2g, nd, elem)
     IMPLICIT NONE
+! #ifndef NOGPU
 !$omp declare target
+! #endif
 !------------------------------------------------------------------------------
     INTEGER, INTENT(IN) :: nd, rows(:), cols(:), l2g(:,:), elem
     INTEGER, INTENT(OUT) :: val_inds(:,:)
@@ -39,7 +41,9 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
                  ! declare target is set
 #endif
     IMPLICIT NONE
+! #ifndef NOGPU
 !$omp declare target
+! #endif
 
 
     INTEGER, INTENT(IN) :: n, nd, nb, l2g(:,:)
@@ -55,7 +59,9 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
 #define ngp_ 4
 #define nd_ 4
     REAL(KIND=dp) :: Basis(ngp,nd)
-    real(kind=dp) :: dBasisdx(ngp,nd,3), DetJ(ngp), dbasisdx_i(nd,3)
+    real(kind=dp) :: dBasisdx(ngp,nd,3)
+    ! real(kind=dp) :: dBasisdx(nd,ngp,3)
+    real(kind=dp) :: DetJ(ngp), dbasisdx_i(nd,3)
     !REAL(KIND=dp) :: MASS(nd,nd), 
     REAL(KIND=dp) :: STIFF(nd,nd), FORCE(nd)
     REAL(KIND=dp) :: DiffCoeff(ngp), SourceCoeff(ngp)
@@ -95,11 +101,11 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
 
       detj(l) = detg ! n_elems x ngp
 
-      do m = 1,nd
+          do m = 1,nd
+      do k=1,dim
         do j=1,dim
-          do k=1,dim
             dbasisdx(l,m,j) = dbasisdx(l,m,j) + refdbasisdx(m,k,l)*LtoGMap(j,k) ! n_elems x (ngp * 3 * 3)
-            ! dbasisdx(l,m,j) = dbasisdx(l,m,j) + dLBasisdx(m,k)*LtoGMap(j,k)
+            ! dbasisdx(m,l,j) = dbasisdx(m,l,j) + refdbasisdx(m,k,l)*LtoGMap(j,k) ! n_elems x (ngp * 3 * 3)
           end do 
         end do
       end do
@@ -118,16 +124,17 @@ SUBROUTINE ModuleLocalMatrixVecSO( n, nd, nb, x, y, z, dim, refbasis, refdBasisd
     STIFF = 0._dp
     DiffCoeff = 1._dp ! TODO: Material parameters must be communicated somehow to the solver
 #if 1
-    do j=1,nd
-      do i = 1,nd
-        do k = 1,dim
-          do l = 1,ngp
-            stiff(i,j) = stiff(i,j) + dbasisdx(l,i,k)*dbasisdx(l,j,k)*diffcoeff(l)*detJ(l)*ip%s(l)
-          end do
-          !stiffs(elem,(i-1)*nd+j) = stiff(i,j)
-        end do
+  do j=1,nd
+    do i = 1,nd
+      do k = 1,dim
+        do l = 1,ngp
+          stiff(i,j) = stiff(i,j) + dbasisdx(l,i,k)*dbasisdx(l,j,k)*diffcoeff(l)*detJ(l)*ip%s(l)
+          ! stiff(i,j) = stiff(i,j) + dbasisdx(i,l,k)*dbasisdx(l,j,k)*diffcoeff(l)*detJ(l)*ip%s(l)
       end do
+      !stiffs(elem,(i-1)*nd+j) = stiff(i,j)
     end do
+  end do
+end do
 
     sourcecoeff = 1._dp
     FORCE = 0._dp
@@ -234,7 +241,7 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
   write(ERROR_UNIT,'(A)') '=== TARGET DEBUG START ==='
   !!$omp target data map(from: stiffs(:,:), val_inds(:,:), forces(:,:))
 #ifndef NOGPU
-  !$omp target teams distribute parallel do simd num_teams(220) thread_limit(64)
+  !$omp target teams distribute parallel do simd num_teams(220) thread_limit(128)
 #else
 !$omp parallel do simd
 #endif
@@ -301,7 +308,9 @@ subroutine myElementMetric(nDOFs,nnodes,xx,yy,zz,dim,DetG,dLBasisdx,LtoGMap, ele
 use Types, only: dp ! , nodes_t
 !use DefUtils
 implicit none
+! #ifndef NOGPU
 !$omp declare target
+! #endif
 !------------------------------------------------------------------------------
 INTEGER, intent(in) :: nDOFs, dim, nnodes, elem   !< Number of active nodes in element, dimension of space, 
 ! TYPE(Nodes_t), intent(in)  :: Nodes             !< Element nodal coordinates
@@ -417,7 +426,9 @@ end subroutine  myElementMetric
 
   PURE SUBROUTINE InvertMatrix3x3( G,GI,detG )
     use Types, only: dp
+! #ifndef NOGPU
     !$omp declare target
+! #endif
 !------------------------------------------------------------------------------
     REAL(KIND=dp), INTENT(IN) :: G(3,3)
     REAL(KIND=dp), INTENT(OUT) :: GI(3,3)
@@ -444,7 +455,9 @@ end subroutine  myElementMetric
   SUBROUTINE LinearForms_GradUdotGradU(m, n, dim, GradU, weight, G, alpha)
     USE Types, ONLY: dp, VECTOR_BLOCK_LENGTH, VECTOR_SMALL_THRESH
     IMPLICIT NONE
+! #ifndef NOGPU
     !$omp declare target 
+! #endif
     INTEGER, INTENT(IN) :: m, n, dim
     REAL(KIND=dp) CONTIG, INTENT(IN) :: GradU(:,:,:), weight(:)
     REAL(KIND=dp) CONTIG, INTENT(INOUT) :: G(:,:)
@@ -475,7 +488,9 @@ end subroutine  myElementMetric
   SUBROUTINE LinearForms_UdotF(m, n, U, weight, F, UdotF)
   USE Types, ONLY: dp, VECTOR_BLOCK_LENGTH, VECTOR_SMALL_THRESH
     IMPLICIT NONE
+! #ifndef NOGPU
     !$omp declare target 
+! #endif
 
     INTEGER, INTENT(IN) :: m, n
     REAL(KIND=dp) CONTIG, INTENT(IN) :: U(:,:), F(:), weight(:)
@@ -609,13 +624,19 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
 #endif
 
   coorddim = CoordinateSystemDimension()
+#ifndef NOGPU
   !$omp target
+#endif
 #ifdef _OPENMP
   initial_device = omp_is_initial_device()
 #endif
+#ifndef NOGPU
   !$omp end target
+#endif
 #ifdef _OPENMP
+#ifndef NOGPU
   print *, 'initial_device:', initial_device
+#endif
 #endif
 
 
@@ -712,7 +733,9 @@ SUBROUTINE AdvDiffSolver( Model,Solver,dt,TransientSimulation )
   ! TODO: here we assume that all elements are the same
   dim = CoordinateSystemDimension()
   refIP = GaussPoints( Element )
+  ! call warn('poisson test solver','forcing ngp to 4')
   ngp = refIP % n
+  ! ngp = 4
   nd = GetElementNOFDOFs(Element)
   print *, 'NGP:', ngp
 

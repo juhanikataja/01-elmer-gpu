@@ -12,7 +12,7 @@
 #SBATCH --job-name=ChEESE_test
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
-#SBATCH --partition=dev-g
+#SBATCH --partition=small
 
 ####### change to your project #######
 #SBATCH --account=project_462000007
@@ -22,17 +22,17 @@
 #######     do the math by matching the product of next entries   #####
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gpus=1
-#SBATCH --gpus-per-node=1
-#SBATCH --gpus-per-task=1
-#SBATCH --mem=250G
+##SBATCH --gpus=1
+##SBATCH --gpus-per-node=1
+##SBATCH --gpus-per-task=1
+##SBATCH --mem=250G
 #SBATCH --exclusive
 
 ################## OpenMP Stuff ##########
 ## use only if you undersubscribe
 ## the MPI tasks
 ##########################################
-#SBATCH --cpus-per-task=56
+#SBATCH --cpus-per-task=64
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 echo "running OpenMP on $SLURM_CPUS_PER_TASK"
 #export KMP_AFFINITY=compact
@@ -75,8 +75,6 @@ export LIBOMPTARGET_INFO=-1
 #module load elmer/gcc-cray
 ###### make it so! ######### 
 
-export CASE_SOLVER_MODULE=poisson.so
+export CASE_SOLVER_MODULE=Poisson_cpu.so
 srun ElmerSolver case.sif
-
-export CASE_SOLVER_MODULE=poisson_cpu.so
-srun ElmerSolver case.sif
+srun rocminfo
