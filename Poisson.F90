@@ -243,9 +243,9 @@ SUBROUTINE loop_over_active(active, elemdofs, max_nd, x, y, z, dim, refbasis, re
 #ifndef NOGPU
 
 #ifdef NO_THREAD_LIMIT
-  !$omp target teams distribute parallel do simd num_teams(110)
+  !$omp target teams distribute parallel do simd
 #else
-  !$omp target teams distribute parallel do simd num_teams(110) thread_limit(64)
+  !$omp target teams distribute parallel do simd num_teams(220) thread_limit(64)
 #endif
 
 #else
